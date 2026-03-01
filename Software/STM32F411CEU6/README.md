@@ -1,36 +1,121 @@
-# Installer un fichier `.elf` avec STM32CubeProgrammer
+# STM32F411CEU6 USB-UART Bridge
 
-Ce guide explique comment installer un fichier `.elf` sur une carte STM32F411CEU6 à l'aide de STM32CubeProgrammer.
+Firmware pour la carte STM32F411CEU6 (Black Pill) qui crée un pont USB-UART :
+- **USB CDC** : Port série virtuel sur USB
+- **UART1** : Communication série sur PA9 (TX) / PA10 (RX) à 115200 bauds
+- **LED PC13** : Clignote lors de l'activité
 
 ## Prérequis
-1. Télécharger et installer [STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html).
-2. Un fichier `.elf` compilé pour la carte STM32F411CEU6.
-3. Un câble USB pour connecter la carte STM32 à votre ordinateur.
 
-## Étapes pour flasher le fichier `.elf`
-1. **Connecter la carte STM32 :**
-   - Branchez la carte STM32F411CEU6 à votre ordinateur via le câble USB.
+### NixOS
+```bash
+# Toutes les dépendances sont gérées via nix-shell
+```
 
-2. **Lancer STM32CubeProgrammer :**
-   - Ouvrez STM32CubeProgrammer sur votre ordinateur.
-   - Assurez-vous que la carte est détectée dans l'onglet `Port`.
+### Autres distributions
+```bash
+# Installer le toolchain ARM
+sudo apt install gcc-arm-none-eabi
 
-3. **Charger le fichier .elf :**
-   - Cliquez sur le bouton `Open File` et sélectionnez votre fichier `.elf`.
+# Installer dfu-util pour le flashage
+sudo apt install dfu-util
 
-4. **Configurer les options :**
-   - Vérifiez que l'adresse de programmation est correcte (par défaut, elle devrait être configurée pour votre carte).
-   - Sélectionnez les options de flash pour inclure uniquement le fichier `.elf`.
+# Installer pyserial pour les tests
+pip install pyserial
+```
 
-5. **Programmer la carte :**
-   - Cliquez sur le bouton `Download` pour flasher le fichier sur la carte.
-   - Attendez que le processus se termine avec succès.
+## Compilation
 
-6. **Vérifier l'installation :**
-   - Une fois l'installation terminée, déconnectez et redémarrez la carte pour exécuter le programme.
+```bash
+cd Software/STM32F411CEU6
+
+# Sur NixOS
+nix-shell -p gcc-arm-embedded --run "make clean && make"
+
+# Autres distributions
+make clean && make
+```
+
+Le firmware compilé se trouve dans `build/blackpill_F411CEU6.bin`.
+
+## Flash : DFU (via USB)
+
+1. **Mettre la carte en mode DFU** :
+   - Maintenir le bouton **BOOT0** enfoncé
+   - Appuyer et relâcher le bouton **RESET**
+   - Relâcher le bouton **BOOT0**
+
+2. **Vérifier la détection** :
+   ```bash
+   lsusb | grep "0483:df11"
+   # Doit afficher : STMicroelectronics STM Device in DFU Mode
+   ```
+
+3. **Flasher** :
+   ```bash
+   # Sur NixOS
+   nix-shell -p gcc-arm-embedded dfu-util --run "make flash"
+
+   # Autres distributions
+   make flash
+   ```
 
 ## Dépannage
-- Si la carte n'est pas détectée, assurez-vous qu'elle est en mode Bootloader (appuyez sur le bouton Boot0 tout en connectant la carte).
-- Consultez la documentation officielle [STM32CubeProgrammer User Manual](https://www.st.com/resource/en/user_manual/dm00403560-stm32cubeprogrammer-software-description-stmicroelectronics.pdf) pour des informations supplémentaires.
 
----
+### Périphérique non détecté
+
+```bash
+# Vérifier les périphériques USB
+lsusb | grep 0483
+
+# Vérifier les logs kernel
+dmesg | tail -20
+
+# Lister les ports série
+ls -la /dev/ttyACM* /dev/ttyUSB*
+```
+
+### Permission refusée
+
+```bash
+# Ajouter l'utilisateur au groupe dialout
+sudo usermod -a -G dialout $USER
+# Se déconnecter et reconnecter
+
+# Ou créer une règle udev
+echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="0483", MODE="0666"' | \
+  sudo tee /etc/udev/rules.d/99-stm32.rules
+sudo udevadm control --reload-rules
+```
+
+### Mode DFU non détecté
+
+- Vérifier que BOOT0 est bien maintenu pendant le RESET
+- Essayer un autre câble USB (vérifier que le câble USB supporte les données et
+  pas uniquement l'alimentation)
+
+## Structure du projet
+
+```
+Software/STM32F411CEU6/
+├── src/                    # Code source
+│   ├── main.c              # Point d'entrée et boucle principale
+│   ├── main.h
+│   ├── stm32f4xx_hal_msp.c # Configuration GPIO pour UART/USB
+│   ├── stm32f4xx_it.c      # Gestionnaires d'interruptions
+│   ├── system_stm32f4xx.c  # Initialisation système
+│   ├── usb_device.c        # Initialisation USB
+│   ├── usbd_cdc_if.c       # Interface USB CDC
+│   ├── usbd_conf.c         # Configuration USB bas niveau
+│   ├── usbd_desc.c         # Descripteurs USB
+│   └── startup_stm32f411ceux.s
+├── Inc/
+│   └── stm32f4xx_hal_conf.h
+├── Drivers/                # Bibliothèques HAL et CMSIS
+├── Middlewares/            # USB Device Library
+├── tests/                  # Scripts de test Python
+├── build/                  # Fichiers compilés
+├── Makefile
+├── STM32F411CEUX_FLASH.ld  # Script de linkage
+└── README.md
+```

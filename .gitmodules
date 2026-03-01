@@ -1,0 +1,12 @@
+[submodule "Software/STM32F411CEU6/Drivers/STM32F4xx_HAL_Driver"]
+	path = Software/STM32F411CEU6/Drivers/STM32F4xx_HAL_Driver
+	url = https://github.com/STMicroelectronics/stm32f4xx_hal_driver.git
+[submodule "Software/STM32F411CEU6/Drivers/CMSIS/Device/ST/STM32F4xx"]
+	path = Software/STM32F411CEU6/Drivers/CMSIS/Device/ST/STM32F4xx
+	url = https://github.com/STMicroelectronics/cmsis_device_f4.git
+[submodule "Software/STM32F411CEU6/Middlewares/ST/STM32_USB_Device_Library"]
+	path = Software/STM32F411CEU6/Middlewares/ST/STM32_USB_Device_Library
+	url = https://github.com/STMicroelectronics/stm32_mw_usb_device.git
+[submodule "Software/STM32F411CEU6/Drivers/CMSIS/Core"]
+	path = Software/STM32F411CEU6/Drivers/CMSIS/Core
+	url = https://github.com/STMicroelectronics/cmsis_core.git
