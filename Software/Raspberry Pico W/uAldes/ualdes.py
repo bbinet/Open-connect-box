@@ -282,6 +282,11 @@ def frame_decode(data):
 
     decoded_frame = {}
 
+    # Check for empty or too short frames
+    if not data or len(data) < 2:
+        print("Invalid frame: too short")
+        return None
+
     # Check if the frame is valid
     if aldes_checksum_test(data):
         for item, properties in ITEMS_MAPPING.items():
