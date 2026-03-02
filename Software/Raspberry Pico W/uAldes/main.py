@@ -26,154 +26,267 @@ SOFTWARE.
 # This includes MQTT settings, WiFi credentials, and topic paths.
 # Make any changes to the configuration file instead of modifying this main script.
 
-from machine import Pin, UART, reset
+from machine import Pin, UART, reset, WDT
 import utime
-import network, rp2
 
-#from umqttsimple import MQTTClient
-from simple import MQTTClient
+# Import ESPicoW for RP2040+ESP8285 WiFi
+from espicoW import ESPicoW
 
 import ualdes
-from config import MQTT_CONFIG,MQTT_TOPICS, WIFI_NETWORKS,UALDES_OPTIONS
+from config import WIFI_NETWORKS, UALDES_OPTIONS, HARDWARE_CONFIG, SERVICES
 
-RELEASE_DATE = "20_05_2025"
-VERSION = "2.1"
+RELEASE_DATE = "02_03_2026"
+VERSION = "4.0"
 
-# Example of serial input format
-example_serial_input = [0x33, 0xff, 0x4c, 0x33, 0x26, 0x00, 0x01, 0x01, 0x98, 0x03, 0x00, 0x00, 0x88, 0x00, 0x00, 0x28, 
-                       0x95, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 
-                       0x56, 0x56, 0x56, 0x00, 0x93, 0x8b, 0xff, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-                       0x00, 0x81, 0xc7, 0x2c, 0x01, 0x00, 0x00, 0x00, 0x00, 0xb0, 0xda, 0x38, 0x00, 0x00, 0x00, 0x00, 
-                       0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x32, 0x7a]
+print(f"uAldes ESP8285 Version - Release Date: {RELEASE_DATE} - Version: {VERSION}")
 
-print(f"Release Date : {RELEASE_DATE}")
-
-# UART to STM32 setup :   
-uart = UART(0, baudrate=115200, tx=Pin(0), rx=Pin(1))
-
-# Software variables : 
-last_message = 0
-
-led=Pin("LED",Pin.OUT)
+# Initialize LED
+led_pin = HARDWARE_CONFIG.get("led_pin", 25)
+try:
+    led = Pin(led_pin, Pin.OUT)
+except:
+    led = Pin(25, Pin.OUT)
 led.off()
-rp2.country('FR')
-wlan = network.WLAN(network.STA_IF)
 
-wlan.active(True)
-wlan.connect(WIFI_NETWORKS["ssid"], WIFI_NETWORKS["password"])
-print(f"Trying to connect to WiFi...")
-# Add timeout for connection attempts
-max_wait = 10
-while max_wait > 0:
-  if wlan.isconnected():
-    break
-  max_wait -= 1
-  print('Waiting for connection...')
-  utime.sleep(1)
-if not wlan.isconnected():
-  print('Failed to connect to WiFi. Restarting...')
-  reset()
-led.on()
-print('Connection successful')
-print(wlan.ifconfig())
+# Initialize UART to STM32
+uart = UART(
+    HARDWARE_CONFIG["stm32_uart_id"],
+    baudrate=HARDWARE_CONFIG["stm32_baudrate"],
+    tx=Pin(HARDWARE_CONFIG["stm32_tx_pin"]),
+    rx=Pin(HARDWARE_CONFIG["stm32_rx_pin"])
+)
+print(f"STM32 UART initialized on UART{HARDWARE_CONFIG['stm32_uart_id']} (TX: GP{HARDWARE_CONFIG['stm32_tx_pin']}, RX: GP{HARDWARE_CONFIG['stm32_rx_pin']})")
 
-def try_reconnect(max_attempts=5):
-    global client
-    attempts = 0
-    while attempts < max_attempts:
-        try:
-            print("Tentative de reconnexion MQTT...")
-            client = connect_and_subscribe()
-            print("Reconnexion MQTT réussie")
-            return
-        except Exception as e:
-            print("Échec de reconnexion MQTT :", e)
-            attempts += 1
-            utime.sleep(10)
-    print("Reconnexion impossible. Redémarrage du système.")
+# Initialize ESP8285 WiFi module
+print("Initializing ESP8285 WiFi module...")
+wifi = ESPicoW(
+    uart_id=HARDWARE_CONFIG["esp_uart_id"],
+    tx_pin=HARDWARE_CONFIG["esp_tx_pin"],
+    rx_pin=HARDWARE_CONFIG["esp_rx_pin"],
+    baudrate=HARDWARE_CONFIG["esp_baudrate"],
+    debug=HARDWARE_CONFIG.get("esp_debug", False)
+)
+
+# Test ESP8285 communication
+print("Testing ESP8285 module...")
+if not wifi.test():
+    print("ESP8285 not responding. Attempting reset...")
+    wifi.reset()
+    utime.sleep(2)
+    if not wifi.test():
+        print("ESP8285 communication failed. Please check wiring.")
+        print("Restarting in 10 seconds...")
+        utime.sleep(10)
+        reset()
+
+print("ESP8285 module OK")
+print(f"Firmware version: {wifi.get_version()}")
+
+# Software variables
+last_message = 0
+mqtt_client = None
+http_server = None
+
+# Connect to WiFi
+def connect_wifi(max_attempts=10):
+    """Connect to WiFi using ESP8285"""
+    print(f"Connecting to WiFi: {WIFI_NETWORKS['ssid']}...")
+
+    for attempt in range(max_attempts):
+        if wifi.connect(WIFI_NETWORKS["ssid"], WIFI_NETWORKS["password"], timeout=15000):
+            # Wait for IP address to be assigned
+            for _ in range(5):
+                utime.sleep(1)
+                ip_info = wifi.get_ip()
+                if ip_info.get('station'):
+                    print(f"WiFi connected! IP: {ip_info['station']}")
+                    led.on()
+                    return True
+            # Connected but no IP yet, continue anyway
+            print("WiFi connected! (IP pending)")
+            led.on()
+            return True
+        print(f"Connection attempt {attempt + 1}/{max_attempts} failed...")
+        utime.sleep(2)
+
+    return False
+
+# Initial WiFi connection
+if not connect_wifi():
+    print("Failed to connect to WiFi. Restarting...")
     reset()
 
 
+# MQTT functions (only if enabled)
+if SERVICES.get("mqtt_enabled", False):
+    from simple_esp import MQTTClient
+    from config import MQTT_CONFIG, MQTT_TOPICS
 
-def connect_and_subscribe():
-  global client
-  client = MQTTClient(MQTT_CONFIG["client_id"], MQTT_CONFIG["broker"],MQTT_CONFIG["port"],MQTT_CONFIG["user"],MQTT_CONFIG["password"])
-  client.set_callback(sub_cb)
-  client.connect(timeout=5)
-  client.subscribe(MQTT_TOPICS["command"])
-  print('Connected to %s, subscribed to %s topic' % (MQTT_CONFIG["broker"], MQTT_TOPICS["command"]))
-  return client
+    def try_reconnect_mqtt(max_attempts=5):
+        """Attempt to reconnect to MQTT broker"""
+        global mqtt_client
+        attempts = 0
+        while attempts < max_attempts:
+            try:
+                print("Attempting MQTT reconnection...")
+                mqtt_client = connect_and_subscribe()
+                print("MQTT reconnection successful")
+                return True
+            except Exception as e:
+                print("MQTT reconnection failed:", e)
+                attempts += 1
+                utime.sleep(10)
+        print("MQTT reconnection impossible.")
+        return False
 
-def sub_cb(topic, msg):
-  print((topic, msg))
-  if topic == (MQTT_TOPICS["command"].encode()):
-    led.off()
-    print('Received command: %s' % msg)
-    input_cmd = ualdes.frame_encode(msg)
-    print(input_cmd)
-    if input_cmd != None:      
-       print(uart.write(bytearray(input_cmd)))
-       utime.sleep(0.5)
-    led.on()
+    def connect_and_subscribe():
+        """Connect to MQTT broker and subscribe to command topic"""
+        global mqtt_client
 
-# Connect to MQTT broker
-client = None
-try_reconnect()
+        mqtt_client = MQTTClient(
+            MQTT_CONFIG["client_id"],
+            MQTT_CONFIG["broker"],
+            MQTT_CONFIG["port"],
+            MQTT_CONFIG["user"],
+            MQTT_CONFIG["password"],
+            wifi=wifi,
+            link_id=0
+        )
+        mqtt_client.set_callback(mqtt_callback)
+        mqtt_client.connect(timeout=5)
+        mqtt_client.subscribe(MQTT_TOPICS["command"])
+        print('Connected to %s, subscribed to %s topic' % (MQTT_CONFIG["broker"], MQTT_TOPICS["command"]))
+        return mqtt_client
+
+    def mqtt_callback(topic, msg):
+        """Callback for received MQTT messages"""
+        print((topic, msg))
+        if isinstance(topic, bytes):
+            topic = topic.decode('utf-8')
+        if isinstance(msg, bytes):
+            msg = msg.decode('utf-8')
+
+        if topic == MQTT_TOPICS["command"]:
+            led.off()
+            print('Received command: %s' % msg)
+            input_cmd = ualdes.frame_encode(msg)
+            print(input_cmd)
+            if input_cmd is not None:
+                print(uart.write(bytearray(input_cmd)))
+                utime.sleep(0.5)
+            led.on()
+
+    # Connect to MQTT broker
+    print("MQTT enabled, connecting...")
+    if not try_reconnect_mqtt():
+        print("Warning: MQTT connection failed, continuing without MQTT")
+        SERVICES["mqtt_enabled"] = False
+
+
+# HTTP server (only if enabled)
+if SERVICES.get("http_enabled", False):
+    from http_server import HttpServer
+
+    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80))
+    if http_server.start():
+        ip_info = wifi.get_ip()
+        print(f"HTTP API available at http://{ip_info['station']}/")
+    else:
+        print("Warning: HTTP server failed to start")
+        SERVICES["http_enabled"] = False
+
+
+# Check that at least one service is enabled
+if not SERVICES.get("mqtt_enabled", False) and not SERVICES.get("http_enabled", False):
+    print("Warning: No services enabled (MQTT and HTTP both disabled)")
+
+# Initialize watchdog timer (8 seconds timeout)
+# The watchdog will reset the device if not fed within 8 seconds
+try:
+    wdt = WDT(timeout=8000)
+    print("Watchdog timer enabled (8s timeout)")
+except Exception as e:
+    wdt = None
+    print(f"Watchdog not available: {e}")
 
 last_ping = utime.time()
-ping_interval = 30  # Ping toutes les 30 secondes
+last_wifi_check = utime.time()
+ping_interval = 30
+wifi_check_interval = 30  # Check WiFi every 30 seconds instead of every loop
 
 
 while True:
-  # Vérification périodique de la connexion Wi-Fi
-  if not wlan.isconnected():
-    print("Wi-Fi déconnecté. Tentative de reconnexion...")
-    wlan.connect(WIFI_NETWORKS["ssid"], WIFI_NETWORKS["password"])
-    for i in range(10):
-      if wlan.isconnected():
-        print("Reconnexion Wi-Fi réussie.")
-        break
-      print("Attente reconnexion Wi-Fi...")
-      utime.sleep(1)
-    if not wlan.isconnected():
-      print("Impossible de se reconnecter au Wi-Fi. Redémarrage...")
-      reset()
+    # Feed the watchdog
+    if wdt:
+        wdt.feed()
 
-  try:
-    client.check_msg()
-    uart_data = uart.read()
+    # Check WiFi connection (not every loop to avoid blocking UART)
+    should_check_wifi = (utime.time() - last_wifi_check) > wifi_check_interval
+    if should_check_wifi:
+        last_wifi_check = utime.time()
+        if not wifi.is_connected():
+            print("WiFi disconnected. Attempting to reconnect...")
+            led.off()
+            if not connect_wifi(max_attempts=5):
+                print("Unable to reconnect to WiFi. Restarting...")
+                reset()
+            # Reconnect services after WiFi reconnection
+            if SERVICES.get("mqtt_enabled", False):
+                try_reconnect_mqtt()
+            if SERVICES.get("http_enabled", False) and http_server:
+                http_server.start()
 
+    try:
+        # Handle MQTT if enabled
+        if SERVICES.get("mqtt_enabled", False) and mqtt_client:
+            mqtt_client.check_msg()
 
-    if (utime.time() - last_ping) > ping_interval:
-        try:
-            client.ping()
-            print("Ping envoyé")
-            last_ping = utime.time()
-        except Exception as e:
-            print("Erreur ping, tentative de reconnexion...")
-            try_reconnect()
+            if (utime.time() - last_ping) > ping_interval:
+                try:
+                    mqtt_client.ping()
+                    print("MQTT ping sent")
+                    last_ping = utime.time()
+                except Exception as e:
+                    print("MQTT ping error, attempting reconnection...")
+                    try_reconnect_mqtt()
 
-    if (utime.time() - last_message) > UALDES_OPTIONS["refresh_time"]:
-        if uart_data is not None:
-            print("Trame recue")
-            print(uart_data)
-            print("Taille : " + str(len(uart_data)))
-            try:
-                led.off()
-                client.publish(MQTT_TOPICS["main"]+"trame", bytearray(uart_data).hex(" "))
-                decoded_data = ualdes.frame_decode(uart_data)
-                if decoded_data is not None:  # Check if data was decoded successfully
-                    for topic in decoded_data:
-                        client.publish(MQTT_TOPICS["main"]+topic, str(decoded_data[topic]))
-                        print(f"{MQTT_TOPICS['main']}{topic}: {decoded_data[topic]}")
-                last_message = utime.time()
-                utime.sleep(0.2)
-                led.on()
-            except Exception as e:
-                print("Error publishing data:", e)
-            
-  except Exception as e:
-    led.off()
-    print('General error:', e)
-    utime.sleep(10)
-    try_reconnect()
+        # Handle HTTP if enabled
+        if SERVICES.get("http_enabled", False) and http_server:
+            http_server.check_requests()
+
+        # Read UART data from STM32
+        uart_data = uart.read()
+
+        if (utime.time() - last_message) > UALDES_OPTIONS["refresh_time"]:
+            if uart_data is not None:
+                print("Frame received")
+                print(uart_data)
+                print("Size: " + str(len(uart_data)))
+                try:
+                    led.off()
+                    decoded_data = ualdes.frame_decode(uart_data)
+
+                    if decoded_data is not None:
+                        # Update HTTP server status
+                        if SERVICES.get("http_enabled", False) and http_server:
+                            http_server.update_status(decoded_data)
+
+                        # Publish to MQTT if enabled
+                        if SERVICES.get("mqtt_enabled", False) and mqtt_client:
+                            mqtt_client.publish(MQTT_TOPICS["main"] + "trame", bytearray(uart_data).hex(" "))
+                            for topic in decoded_data:
+                                mqtt_client.publish(MQTT_TOPICS["main"] + topic, str(decoded_data[topic]))
+                                print(f"{MQTT_TOPICS['main']}{topic}: {decoded_data[topic]}")
+
+                    last_message = utime.time()
+                    utime.sleep(0.2)
+                    led.on()
+                except Exception as e:
+                    print("Error processing data:", e)
+
+    except Exception as e:
+        led.off()
+        print('General error:', e)
+        utime.sleep(10)
+        if SERVICES.get("mqtt_enabled", False):
+            try_reconnect_mqtt()
