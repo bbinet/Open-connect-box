@@ -1,95 +1,173 @@
-# uAldes
+# uAldes (ESP8285 Version)
 
-## Présentation
+## Presentation
 
-Ce projet implémente une passerelle entre les communications série UART (depuis un STM32 lui meme raccorder à un chauffe-eau T.FLOW de chez ALDES) et un broker MQTT. Conçu pour fonctionner sur un microcontrôleur comme le Raspberry Pi Pico W, il permet de:
+This project implements a gateway between UART serial communications (from an STM32 connected to an ALDES T.FLOW water heater) and an MQTT broker. Designed to run on RP2040-based boards with ESP8285 WiFi chip (Pico W clones), it allows:
 
-- Recevoir des données depuis un périphérique UART
-- Décoder ces données via la bibliothèque `ualdes`
-- Publier les données décodées sur des topics MQTT configurables
-- Recevoir des commandes MQTT et les transmettre au périphérique UART
+- Receiving data from a UART device
+- Decoding data via the `ualdes` library
+- Publishing decoded data to configurable MQTT topics
+- Receiving MQTT commands and transmitting them via UART
 
-## Caractéristiques
+## Supported Hardware
 
-- ✅ Configuration WiFi et MQTT simplifiée via fichier de configuration
-- ✅ Détection automatique des trames UART
-- ✅ Publication de données en temps réel
-- ✅ Contrôle bidirectionnel (lecture/écriture)
-- ✅ Indicateur LED pour visualiser l'état de connexion et les transmissions
-- ✅ Reconnexion automatique en cas de perte de connexion
+This version is specifically designed for **Pico W clones** that use:
+- **RP2040** microcontroller
+- **ESP8285** WiFi chip (instead of the CYW43439 on genuine Raspberry Pi Pico W)
+
+The ESP8285 communicates with the RP2040 via UART using AT commands.
+
+## Features
+
+- Configuration via `config.py` file for WiFi, MQTT, and hardware settings
+- Automatic UART frame detection
+- Real-time data publishing
+- Bidirectional control (read/write)
+- LED indicator for connection status and transmissions
+- Automatic reconnection on connection loss
+- Support for ESP8285-based Pico clones
 
 ## Configuration
 
-Toute la configuration se fait dans le fichier config.py :
+All configuration is done in `config.py`:
 
-# Paramètres WiFi
+```python
+# WiFi Configuration
 WIFI_NETWORKS = {
-    "ssid": "votre_ssid",
-    "password": "votre_mot_de_passe" 
+    "ssid": "your_ssid",
+    "password": "your_password"
 }
 
-# Configuration MQTT
+# MQTT Configuration
 MQTT_CONFIG = {
     "client_id": "gateway_uart",
-    "broker": "adresse_du_broker",
+    "broker": "broker_address",
     "port": 1883,
-    "user": "utilisateur_mqtt",
-    "password": "mot_de_passe_mqtt"
+    "user": "mqtt_user",
+    "password": "mqtt_password"
 }
 
-# Topics MQTT
+# MQTT Topics
 MQTT_TOPICS = {
     "main": "home/device/",
     "command": "home/device/command"
 }
 
-# Options de la bibliothèque UALDES
+# UALDES options
 UALDES_OPTIONS = {
-    "refresh_time": 60  # Temps de rafraîchissement en secondes
+    "refresh_time": 60  # Refresh time in seconds
 }
+
+# Hardware Configuration for RP2040 + ESP8285 clone
+HARDWARE_CONFIG = {
+    # ESP8285 WiFi module UART configuration
+    "esp_uart_id": 0,
+    "esp_tx_pin": 0,
+    "esp_rx_pin": 1,
+    "esp_baudrate": 115200,
+    "esp_debug": False,  # Set to True to see AT commands
+
+    # STM32 communication UART configuration
+    "stm32_uart_id": 1,
+    "stm32_tx_pin": 4,
+    "stm32_rx_pin": 5,
+    "stm32_baudrate": 115200,
+
+    # LED pin (GPIO number)
+    "led_pin": 25,
+}
+```
+
+## Hardware Connections
+
+### ESP8285 Module (WiFi)
+Usually pre-wired on the board:
+- **UART0 TX**: GPIO 0 (Pin 1)
+- **UART0 RX**: GPIO 1 (Pin 2)
+
+### STM32 Communication
+- **UART1 TX**: GPIO 4 (Pin 6)
+- **UART1 RX**: GPIO 5 (Pin 7)
+- **Power**: USB or external 5V source
+
+### Wiring Diagram
+```
+RP2040 + ESP8285 Board          STM32
+┌─────────────────────┐         ┌─────────┐
+│                     │         │         │
+│  GP4 (UART1 TX) ────┼────────►│ RX      │
+│  GP5 (UART1 RX) ◄───┼─────────│ TX      │
+│  GND ───────────────┼─────────│ GND     │
+│                     │         │         │
+│  [ESP8285 internal] │         └─────────┘
+│  GP0 ◄──► ESP TX    │
+│  GP1 ◄──► ESP RX    │
+└─────────────────────┘
+```
 
 ## Installation
 
-1. Flashez MicroPython sur votre Raspberry Pi Pico W
-2. Transférez les fichiers suivants sur la carte:
-   - main.py
-   - config.py (à créer selon le modèle ci-dessus)
-   - simple.py (bibliothèque MQTT)
-   - ualdes.py (bibliothèque de décodage Aldes)
+1. Flash MicroPython on your RP2040 board (use standard RP2040 MicroPython, NOT Pico W version)
+2. Transfer the following files to the board:
+   - `main.py`
+   - `config.py` (create based on template above)
+   - `simple_esp.py` (MQTT library for ESP8285)
+   - `espicoW.py` (ESP8285 WiFi driver)
+   - `ualdes.py` (Aldes decoding library)
 
-## Connexions matérielles
+## Usage
 
-- **UART TX**: GPIO 0 (Pin 1)
-- **UART RX**: GPIO 1 (Pin 2)
-- **Alimentation**: USB ou source externe 5V
+Once configured and started, the system will:
+1. Initialize the ESP8285 module and test communication
+2. Connect to the WiFi network
+3. Establish a connection with the MQTT broker
+4. Listen for UART data and publish to corresponding topics
+5. Listen for MQTT commands and transmit via UART
 
-## Utilisation
+## Troubleshooting
 
-Une fois configuré et démarré, le système:
-1. Se connecte automatiquement au réseau WiFi
-2. Établit une connexion avec le broker MQTT
-3. Commence à écouter les données UART et les publie sur les topics correspondants
-4. Écoute les commandes MQTT et les transmet via UART
+### ESP8285 Not Responding
+- Check that the ESP8285 is properly connected to UART0 (GP0/GP1)
+- Verify the baudrate (usually 115200)
+- Enable debug mode in config: `"esp_debug": True`
 
-## Format des données
+### No WiFi Connection
+- Verify SSID and password
+- Ensure the network is 2.4GHz (ESP8285 doesn't support 5GHz)
+- Check signal strength
 
-Le système reçoit des trames UART au format binaire. Exemple de trame:
+### MQTT Connection Issues
+- Verify broker address and port
+- Check credentials
+- Ensure the broker accepts non-SSL connections (port 1883)
 
+## Data Format
+
+The system receives UART frames in binary format. Example:
 ```
 [0x33, 0xff, 0x4c, 0x33, 0x26, 0x00, ...]
 ```
 
-Ces données sont décodées par ualdes.py et publiées sur des topics MQTT individuels.
+These data are decoded by `ualdes.py` and published to individual MQTT topics.
 
-## Licence
+## Differences from Original Pico W Version
 
-MIT License © 2025 Yann DOUBLET
+| Feature | Pico W | ESP8285 Clone |
+|---------|--------|---------------|
+| WiFi Chip | CYW43439 | ESP8285 |
+| WiFi API | `network.WLAN` | AT Commands via UART |
+| Available UARTs | 2 (both free) | 1 free (UART1) |
+| HTTPS Support | Yes | No (HTTP only) |
+
+## License
+
+MIT License - 2025 Yann DOUBLET
 
 ## Version
 
-Version: 2.0  
-Date de publication: 11/05/2025
+Version: 3.0
+Release Date: 01/03/2026
 
 ---
 
-⚠️ **Avertissement**: Ne modifiez pas directement le fichier main.py. Toutes les configurations doivent être effectuées dans le fichier config.py.
+**Warning**: Do not modify the `main.py` file directly. All configurations should be done in `config.py`.
