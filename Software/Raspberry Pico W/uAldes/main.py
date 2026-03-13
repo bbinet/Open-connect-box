@@ -38,7 +38,29 @@ from config import WIFI_NETWORKS, UALDES_OPTIONS, HARDWARE_CONFIG, SERVICES
 RELEASE_DATE = "02_03_2026"
 VERSION = "4.0"
 
+# Boot count - persisted to file
+BOOTCOUNT_FILE = "bootcount.txt"
+
+def load_bootcount():
+    try:
+        with open(BOOTCOUNT_FILE, "r") as f:
+            return int(f.read().strip())
+    except:
+        return 0
+
+def save_bootcount(count):
+    try:
+        with open(BOOTCOUNT_FILE, "w") as f:
+            f.write(str(count))
+    except Exception as e:
+        print(f"Failed to save bootcount: {e}")
+
+boot_count = load_bootcount() + 1
+save_bootcount(boot_count)
+reconnection_count = 0
+
 print(f"uAldes ESP8285 Version - Release Date: {RELEASE_DATE} - Version: {VERSION}")
+print(f"Boot count: {boot_count}")
 
 # Initialize LED
 led_pin = HARDWARE_CONFIG.get("led_pin", 25)
@@ -187,7 +209,13 @@ if SERVICES.get("mqtt_enabled", False):
 if SERVICES.get("http_enabled", False):
     from http_server import HttpServer
 
-    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80))
+    def get_system_stats():
+        return {
+            "boot_count": boot_count,
+            "reconnection_count": reconnection_count
+        }
+
+    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80), stats_callback=get_system_stats)
     if http_server.start():
         ip_info = wifi.get_ip()
         print(f"HTTP API available at http://{ip_info['station']}/")
@@ -212,40 +240,49 @@ except Exception as e:
 last_ping = utime.time()
 last_wifi_check = utime.time()
 ping_interval = 30
-wifi_check_interval = 30  # Check WiFi every 30 seconds instead of every loop
+wifi_check_interval = 60
+consecutive_failures = 0
+
+
+def check_and_reconnect_wifi():
+    """Check WiFi and reconnect if needed."""
+    global consecutive_failures, reconnection_count
+    if not wifi.is_connected():
+        print("WiFi disconnected. Attempting to reconnect...")
+        led.off()
+        reconnection_count += 1
+        if not connect_wifi(max_attempts=5):
+            print("Unable to reconnect to WiFi. Restarting...")
+            reset()
+        if SERVICES.get("mqtt_enabled", False):
+            try_reconnect_mqtt()
+        if SERVICES.get("http_enabled", False) and http_server:
+            http_server.start()
+        consecutive_failures = 0
 
 
 while True:
+    current_time = utime.time()
+
     # Feed the watchdog
     if wdt:
         wdt.feed()
 
-    # Check WiFi connection (not every loop to avoid blocking UART)
-    should_check_wifi = (utime.time() - last_wifi_check) > wifi_check_interval
-    if should_check_wifi:
-        last_wifi_check = utime.time()
-        if not wifi.is_connected():
-            print("WiFi disconnected. Attempting to reconnect...")
-            led.off()
-            if not connect_wifi(max_attempts=5):
-                print("Unable to reconnect to WiFi. Restarting...")
-                reset()
-            # Reconnect services after WiFi reconnection
-            if SERVICES.get("mqtt_enabled", False):
-                try_reconnect_mqtt()
-            if SERVICES.get("http_enabled", False) and http_server:
-                http_server.start()
+    # Check WiFi connection periodically
+    if (current_time - last_wifi_check) > wifi_check_interval:
+        last_wifi_check = current_time
+        check_and_reconnect_wifi()
 
     try:
         # Handle MQTT if enabled
         if SERVICES.get("mqtt_enabled", False) and mqtt_client:
             mqtt_client.check_msg()
 
-            if (utime.time() - last_ping) > ping_interval:
+            if (current_time - last_ping) > ping_interval:
                 try:
                     mqtt_client.ping()
                     print("MQTT ping sent")
-                    last_ping = utime.time()
+                    last_ping = current_time
                 except Exception as e:
                     print("MQTT ping error, attempting reconnection...")
                     try_reconnect_mqtt()
@@ -257,7 +294,7 @@ while True:
         # Read UART data from STM32
         uart_data = uart.read()
 
-        if (utime.time() - last_message) > UALDES_OPTIONS["refresh_time"]:
+        if (current_time - last_message) > UALDES_OPTIONS["refresh_time"]:
             if uart_data is not None:
                 print("Frame received")
                 print(uart_data)
@@ -278,7 +315,7 @@ while True:
                                 mqtt_client.publish(MQTT_TOPICS["main"] + topic, str(decoded_data[topic]))
                                 print(f"{MQTT_TOPICS['main']}{topic}: {decoded_data[topic]}")
 
-                    last_message = utime.time()
+                    last_message = current_time
                     utime.sleep(0.2)
                     led.on()
                 except Exception as e:
@@ -290,3 +327,6 @@ while True:
         utime.sleep(10)
         if SERVICES.get("mqtt_enabled", False):
             try_reconnect_mqtt()
+
+    # Small delay to avoid tight-looping and give ESP8285 time to process
+    utime.sleep_ms(50)

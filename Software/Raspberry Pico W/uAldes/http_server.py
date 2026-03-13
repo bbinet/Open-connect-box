@@ -76,7 +76,7 @@ class HttpServer:
 
     VERSION = "1.0"
 
-    def __init__(self, wifi, uart, port=80):
+    def __init__(self, wifi, uart, port=80, stats_callback=None):
         self.wifi = wifi
         self.uart = uart
         self.port = port
@@ -84,6 +84,7 @@ class HttpServer:
         self.running = False
         self.start_time = None
         self.request_count = 0
+        self.stats_callback = stats_callback
 
     def start(self):
         """Start the HTTP server"""
@@ -219,6 +220,14 @@ class HttpServer:
                 "requests": self.request_count,
                 "status_cached": bool(self.last_status)
             }
+            # Add system stats if callback provided
+            if self.stats_callback:
+                try:
+                    stats = self.stats_callback()
+                    info["boot_count"] = stats.get("boot_count", 0)
+                    info["reconnection_count"] = stats.get("reconnection_count", 0)
+                except:
+                    pass
             response = json_response(info)
 
         elif path == "/ualdes":

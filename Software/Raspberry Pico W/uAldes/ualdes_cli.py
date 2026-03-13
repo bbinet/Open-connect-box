@@ -206,7 +206,8 @@ def format_status(data):
     lines.append("|           ALDES STATUS              |")
     lines.append("+-------------------------------------+")
 
-    for key, value in data.items():
+    for key in sorted(data.keys()):
+        value = data[key]
         label = FIELD_LABELS.get(key, key)
         unit = FIELD_UNITS.get(key, "")
         if unit:
@@ -221,6 +222,18 @@ def format_status(data):
     return "\n".join(lines)
 
 
+INFO_LABELS = {
+    "version": "Version",
+    "ip": "IP Address",
+    "uptime": "Uptime",
+    "uptime_seconds": "Uptime (seconds)",
+    "requests": "Requests",
+    "status_cached": "Status cached",
+    "boot_count": "Boot count",
+    "reconnection_count": "Reconnections",
+}
+
+
 def format_info(data):
     """Format device info for human-readable output"""
     if not data:
@@ -230,11 +243,13 @@ def format_info(data):
     lines.append("+-------------------------------------+")
     lines.append("|           DEVICE INFO               |")
     lines.append("+-------------------------------------+")
-    lines.append(f"| Version          {str(data.get('version', '?')):>18} |")
-    lines.append(f"| IP Address       {str(data.get('ip', '?')):>18} |")
-    lines.append(f"| Uptime           {str(data.get('uptime', '?')):>18} |")
-    lines.append(f"| Requests         {str(data.get('requests', '?')):>18} |")
-    lines.append(f"| Status cached    {str(data.get('status_cached', '?')):>18} |")
+
+    for key in sorted(data.keys()):
+        value = data[key]
+        label = INFO_LABELS.get(key, key)
+        line = f"| {label:<18} {str(value):>16} |"
+        lines.append(line)
+
     lines.append("+-------------------------------------+")
     return "\n".join(lines)
 

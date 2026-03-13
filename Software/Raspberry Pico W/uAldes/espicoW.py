@@ -95,7 +95,9 @@ class ESPicoW:
 
     def is_connected(self):
         resp = self._send_cmd("AT+CWJAP?", timeout=2000)
-        return "No AP" not in resp and "ERROR" not in resp
+        # Positive response: +CWJAP:"SSID","mac",channel,rssi
+        # Negative response: "No AP", empty, timeout, or error
+        return "+CWJAP:" in resp
 
     def get_ip(self):
         resp = self._send_cmd("AT+CIFSR", timeout=2000)

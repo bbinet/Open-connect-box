@@ -10,8 +10,9 @@ SERVICES = {
 
 # WiFi Configuration
 WIFI_NETWORKS = {
-    "ssid": "nonoclem",
-    "password": "REDACTED"
+    "ssid": "REDACTED",
+    "password": "REDACTED",
+    "gateway": "192.168.1.1"
 }
 
 # MQTT Configuration
