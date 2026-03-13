@@ -82,4 +82,8 @@ HARDWARE_CONFIG = {
     # LED pin - use "LED" for Pico W onboard LED, or GPIO number for external LED
     # Note: Pico clones may not have onboard LED, set to GPIO pin number (e.g., 25)
     "led_pin": 25,
+
+    # ESP8285 sleep mode: 0 = disabled (low latency), 1 = light-sleep (power saving)
+    # Disabling sleep improves ping/response times from ~1000ms to ~50ms
+    "esp_sleep_mode": 0,
 }

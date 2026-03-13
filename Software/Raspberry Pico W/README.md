@@ -286,6 +286,103 @@ Clone Pico W (RP2040+ESP8285)    STM32
 
 ---
 
+## Mise à jour du firmware ESP8285
+
+Les anciens firmwares ESP8285 (AT v1.x de 2018) peuvent avoir des bugs réseau, notamment des problèmes ARP qui empêchent la communication. Si vous rencontrez des problèmes de connectivité (ping échoue, requêtes HTTP timeout), mettez à jour le firmware.
+
+### Fichiers nécessaires
+
+Les fichiers sont disponibles dans le dossier `firmware/`:
+- `Serial_port_transmission.uf2` - Transforme le RP2040 en pont USB-série pour flasher l'ESP8285
+- `espat_221_esp01s.bin` - Firmware AT v2.2.2.0-dev (Oct 2024) pour ESP8285
+
+### Prérequis
+
+```bash
+# Installer esptool (avec pip dans un nix-shell)
+nix-shell -p 'python3.withPackages (ps: [ ps.pip ps.pyserial ])' --run "pip install --target=/tmp/esptool_pkg esptool"
+```
+
+### Procédure de mise à jour
+
+#### Étape 1: Flasher le pont série sur le RP2040
+
+1. Déconnectez le câble USB
+2. Maintenez le bouton **BOOTSEL** enfoncé
+3. Connectez le câble USB tout en maintenant BOOTSEL
+4. Relâchez le bouton - un lecteur **RPI-RP2** apparaît
+5. Copiez le firmware:
+   ```bash
+   cp firmware/Serial_port_transmission.uf2 /run/media/$USER/RPI-RP2/
+   ```
+
+#### Étape 2: Mettre l'ESP8285 en mode flash
+
+1. Déconnectez le câble USB
+2. Maintenez le **deuxième bouton** enfoncé (pas BOOTSEL - souvent marqué "FLASH")
+3. Connectez le câble USB tout en maintenant le bouton
+4. Relâchez le bouton
+
+#### Étape 3: Flasher le firmware ESP8285
+
+```bash
+nix-shell -p 'python3.withPackages (ps: [ ps.pip ps.pyserial ])' --run \
+  "PYTHONPATH=/tmp/esptool_pkg python3 -m esptool -p /dev/ttyACM0 -b 115200 \
+   write_flash -e -fm dout -ff 40m -fs 1MB 0 firmware/espat_221_esp01s.bin"
+```
+
+Sortie attendue:
+```
+Connecting....
+Chip type:          ESP8285N08
+Erasing flash memory...
+Writing at 0x00100000... 100%
+Hash of data verified.
+```
+
+#### Étape 4: Restaurer MicroPython sur le RP2040
+
+1. Déconnectez le câble USB
+2. Maintenez **BOOTSEL** enfoncé, connectez USB
+3. Copiez le firmware MicroPython:
+   ```bash
+   cp RPI_PICO-20250911-v1.26.1.uf2 /run/media/$USER/RPI-RP2/
+   ```
+
+#### Étape 5: Vérifier la mise à jour
+
+```bash
+mpremote exec "
+from machine import UART, Pin
+import time
+uart = UART(0, baudrate=115200, tx=Pin(0), rx=Pin(1))
+time.sleep(0.3)
+while uart.any(): uart.read()
+uart.write('AT+GMR\r\n')
+time.sleep(0.5)
+while uart.any(): print(uart.read().decode())
+"
+```
+
+Résultat attendu: `AT version:2.2.2.0-dev`
+
+---
+
+## Optimisation des performances
+
+### Réduire la latence réseau
+
+Par défaut, l'ESP8285 utilise le mode "light-sleep" pour économiser l'énergie, ce qui augmente la latence (ping ~1000ms). Désactivez-le dans `config.py`:
+
+```python
+HARDWARE_CONFIG = {
+    # ...
+    "esp_sleep_mode": 0,  # 0 = désactivé (latence ~50ms), 1 = light-sleep (~1000ms)
+}
+```
+
+---
+
 ## Dépannage
 
 ### ESP8285 ne répond pas
@@ -295,6 +392,10 @@ Clone Pico W (RP2040+ESP8285)    STM32
 ### Pas de connexion WiFi
 - Le réseau doit être en 2.4GHz (pas de support 5GHz)
 - Vérifiez les identifiants
+
+### Problèmes de connectivité réseau (ARP FAILED, ping timeout)
+- Mettez à jour le firmware ESP8285 (voir section ci-dessus)
+- Vérifiez la version avec `AT+GMR` - les versions < 2.x ont des bugs connus
 
 ### Erreur MQTT
 - Vérifiez l'adresse et le port du broker

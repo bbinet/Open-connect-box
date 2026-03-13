@@ -138,6 +138,13 @@ if not connect_wifi():
     print("Failed to connect to WiFi. Restarting...")
     reset()
 
+# Apply ESP8285 sleep mode setting
+esp_sleep_mode = HARDWARE_CONFIG.get("esp_sleep_mode", 1)
+if wifi.set_sleep_mode(esp_sleep_mode):
+    print(f"ESP8285 sleep mode set to {esp_sleep_mode}")
+else:
+    print("Warning: Failed to set ESP8285 sleep mode")
+
 
 # MQTT functions (only if enabled)
 if SERVICES.get("mqtt_enabled", False):
