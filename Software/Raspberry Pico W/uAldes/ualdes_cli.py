@@ -454,7 +454,7 @@ class UAldesCLI(cmd.Cmd):
 
             setattr(UAldesCLI, f"complete_{cmd_name}", make_complete_method(params))
 
-    def _request(self, endpoint, params=None, is_status=False, retries=2):
+    def _request(self, endpoint, params=None, is_status=False, retries=2, silent=False):
         """Make HTTP request to API with retry logic"""
         url = f"{self.base_url}{endpoint}"
         if params:
@@ -464,12 +464,13 @@ class UAldesCLI(cmd.Cmd):
             try:
                 response = http_get(url, timeout=5)
                 data = json.loads(response)
-                if self.json_output:
-                    print(json.dumps(data, indent=2))
-                elif is_status:
-                    print(format_status(data))
-                else:
-                    print(format_response(data))
+                if not silent:
+                    if self.json_output:
+                        print(json.dumps(data, indent=2))
+                    elif is_status:
+                        print(format_status(data))
+                    else:
+                        print(format_response(data))
                 time.sleep(0.3)  # Small delay after successful request
                 return data
             except Exception as e:
@@ -545,7 +546,7 @@ class UAldesCLI(cmd.Cmd):
 
     def do_schedules(self, arg):
         """List all scheduled commands with their execution status"""
-        data = self._request("/schedules", is_status=False)
+        data = self._request("/schedules", silent=not self.json_output)
         if data and not self.json_output:
             schedules = data.get("schedules", [])
             date = data.get("date", "unknown")
@@ -669,7 +670,7 @@ class UAldesCLI(cmd.Cmd):
 
     def do_time(self, arg):
         """Show current device time (from NTP)"""
-        data = self._request("/time", is_status=False)
+        data = self._request("/time", silent=not self.json_output)
         if data and not self.json_output and "formatted" in data:
             print(f"Device time: {data['formatted']}")
 
