@@ -7,16 +7,16 @@ import json
 
 
 def parse_request(data):
-    """Parse HTTP request and extract method, path, and query params"""
+    """Parse HTTP request and extract method, path, query params, and body"""
     try:
         lines = data.split('\r\n')
         if not lines:
-            return None, None, {}
+            return None, None, {}, None
 
         request_line = lines[0]
         parts = request_line.split(' ')
         if len(parts) < 2:
-            return None, None, {}
+            return None, None, {}, None
 
         method = parts[0]
         full_path = parts[1]
@@ -33,9 +33,14 @@ def parse_request(data):
             path = full_path
             params = {}
 
-        return method, path, params
+        # Extract body (after \r\n\r\n)
+        body = None
+        if '\r\n\r\n' in data:
+            body = data.split('\r\n\r\n', 1)[1]
+
+        return method, path, params, body
     except:
-        return None, None, {}
+        return None, None, {}, None
 
 
 def json_response(data, status=200):
@@ -118,7 +123,7 @@ class HttpServer:
         import ualdes
 
         self.request_count += 1
-        method, path, params = parse_request(data)
+        method, path, params, body = parse_request(data)
 
         # Handle CORS preflight
         if method == "OPTIONS":
@@ -130,7 +135,7 @@ class HttpServer:
             self.wifi.send_response(link_id, response)
             return
 
-        if method != "GET":
+        if method not in ("GET", "POST"):
             response = json_response({"error": "Method not allowed"}, 400)
             self.wifi.send_response(link_id, response)
             return
@@ -411,6 +416,90 @@ class HttpServer:
             else:
                 response = json_response({"error": "Scheduler not enabled"}, 400)
 
+        elif path == "/ota":
+            import os
+            if method == "GET":
+                # List files on device with sizes
+                try:
+                    files = os.listdir("/")
+                    file_info = []
+                    for f in files:
+                        try:
+                            stat = os.stat(f)
+                            file_info.append({"name": f, "size": stat[6]})
+                        except:
+                            file_info.append({"name": f})
+                    response = json_response({"files": file_info})
+                except Exception as e:
+                    response = json_response({"error": str(e)}, 400)
+            elif method == "POST":
+                # Upload file - supports chunked uploads
+                filename = params.get("file")
+                chunk = params.get("chunk")  # chunk number (0-indexed)
+                total = params.get("total")  # total chunks
+                reboot = params.get("reboot", "0") == "1"
+
+                if not filename or not body:
+                    response = json_response({"error": "Missing file param or body", "body_len": len(body) if body else 0}, 400)
+                else:
+                    # Use body directly (no base64)
+                    decoded = body
+
+                    if chunk is not None and total is not None:
+                        # Chunked upload
+                        try:
+                            chunk_num = int(chunk)
+                            total_chunks = int(total)
+                            tmp_file = filename + ".tmp"
+
+                            if chunk_num == 0:
+                                with open(tmp_file, "w") as f:
+                                    f.write(decoded)
+                            else:
+                                with open(tmp_file, "a") as f:
+                                    f.write(decoded)
+
+                            if chunk_num == total_chunks - 1:
+                                try:
+                                    os.remove(filename)
+                                except:
+                                    pass
+                                os.rename(tmp_file, filename)
+                                stat = os.stat(filename)
+                                response = json_response({"status": "ok", "file": filename, "size": stat[6], "chunks": total_chunks})
+                                if reboot:
+                                    self.wifi.send_response(link_id, response)
+                                    import utime
+                                    utime.sleep(1)
+                                    from machine import reset
+                                    reset()
+                                    return
+                            else:
+                                response = json_response({"status": "ok", "chunk": chunk_num, "total": total_chunks})
+                        except Exception as e:
+                            response = json_response({"error": str(e)}, 400)
+                    else:
+                        # Single upload (small file)
+                        try:
+                            tmp_file = filename + ".tmp"
+                            with open(tmp_file, "w") as f:
+                                f.write(decoded)
+                            try:
+                                os.remove(filename)
+                            except:
+                                pass
+                            os.rename(tmp_file, filename)
+                            response = json_response({"status": "ok", "file": filename, "size": len(decoded)})
+                            if reboot:
+                                self.wifi.send_response(link_id, response)
+                                import utime
+                                utime.sleep(1)
+                                from machine import reset
+                                reset()
+                                return
+                        except Exception as e:
+                            response = json_response({"error": str(e)}, 400)
+
         else:
             response = json_response({"error": "Not found", "see": "/help"}, 404)
 
@@ -421,6 +510,6 @@ class HttpServer:
         if not self.running:
             return
 
-        incoming = self.wifi.check_incoming(timeout=50)
+        incoming = self.wifi.check_incoming(timeout=500)
         for link_id, data in incoming:
             self.handle_request(link_id, data)

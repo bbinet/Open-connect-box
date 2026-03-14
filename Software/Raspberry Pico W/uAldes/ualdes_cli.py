@@ -64,6 +64,55 @@ def http_get(url, timeout=5):
         return body
     return response
 
+
+def http_post(url, body, timeout=10):
+    """Make HTTP/1.0 POST request"""
+    if url.startswith("http://"):
+        url = url[7:]
+
+    if "/" in url:
+        host_port, path = url.split("/", 1)
+        path = "/" + path
+    else:
+        host_port = url
+        path = "/"
+
+    if ":" in host_port:
+        host, port = host_port.split(":")
+        port = int(port)
+    else:
+        host = host_port
+        port = 80
+
+    if isinstance(body, str):
+        body = body.encode()
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    sock.connect((host, port))
+
+    request = f"POST {path} HTTP/1.0\r\nHost: {host}\r\nContent-Length: {len(body)}\r\n\r\n"
+    sock.sendall(request.encode() + body)
+
+    response = b""
+    while True:
+        try:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+        except socket.timeout:
+            break
+
+    sock.close()
+
+    response = response.decode()
+    if "\r\n\r\n" in response:
+        headers, body = response.split("\r\n\r\n", 1)
+        return body
+    return response
+
+
 # History file for persistent command history
 HISTORY_FILE = os.path.expanduser("~/.ualdes_history")
 
@@ -673,6 +722,157 @@ class UAldesCLI(cmd.Cmd):
         data = self._request("/time", silent=not self.json_output)
         if data and not self.json_output and "formatted" in data:
             print(f"Device time: {data['formatted']}")
+
+    def do_ota_list(self, arg):
+        """List files on device"""
+        data = self._request("/ota", silent=not self.json_output)
+        if data and not self.json_output:
+            files = data.get("files", [])
+            print(f"+{'─'*40}+")
+            print(f"| {'FILES ON DEVICE':^38} |")
+            print(f"+{'─'*40}+")
+            for f in files:
+                size = f.get("size", "?")
+                line = f"| {f['name']:<25} {size:>10} |"
+                print(line)
+            print(f"+{'─'*40}+")
+
+    def _upload_file(self, local_path, remote_name, reboot=False):
+        """Upload a file to device, using chunks if needed"""
+        CHUNK_SIZE = 1024  # 1KB chunks
+
+        try:
+            with open(local_path, "r") as f:
+                content = f.read()
+        except Exception as e:
+            return False, f"Error reading file: {e}"
+
+        size = len(content)
+
+        if size <= CHUNK_SIZE:
+            # Small file - single upload
+            reboot_flag = "&reboot=1" if reboot else ""
+            url = f"{self.base_url}/ota?file={remote_name}{reboot_flag}"
+            try:
+                response = http_post(url, content, timeout=30)
+                data = json.loads(response)
+                if data.get("status") == "ok":
+                    return True, data.get("size", size)
+                else:
+                    return False, data.get("error", "Unknown error")
+            except Exception as e:
+                if reboot and ("reset" in str(e).lower() or "connection" in str(e).lower()):
+                    return True, "rebooting"
+                return False, str(e)
+        else:
+            # Large file - chunked upload
+            chunks = [content[i:i+CHUNK_SIZE] for i in range(0, size, CHUNK_SIZE)]
+            total = len(chunks)
+
+            for i, chunk in enumerate(chunks):
+                is_last = (i == total - 1)
+                reboot_flag = "&reboot=1" if (reboot and is_last) else ""
+                url = f"{self.base_url}/ota?file={remote_name}&chunk={i}&total={total}{reboot_flag}"
+                try:
+                    response = http_post(url, chunk, timeout=30)
+                    data = json.loads(response)
+                    if data.get("status") != "ok":
+                        return False, f"Chunk {i}: {data.get('error', 'Unknown error')}"
+                    time.sleep(0.3)  # Small delay between chunks
+                except Exception as e:
+                    if is_last and reboot and ("reset" in str(e).lower() or "connection" in str(e).lower()):
+                        return True, "rebooting"
+                    return False, f"Chunk {i}: {e}"
+
+            return True, size
+
+    def do_ota_push(self, arg):
+        """Push a file to device
+        Usage: ota_push <local_file> [remote_name]
+        Example: ota_push main.py
+        Example: ota_push ./new_main.py main.py
+        """
+        args = arg.split()
+        if not args:
+            print("Usage: ota_push <local_file> [remote_name]")
+            return
+
+        local_file = args[0]
+        remote_name = args[1] if len(args) > 1 else os.path.basename(local_file)
+
+        if not os.path.exists(local_file):
+            print(f"Error: File not found: {local_file}")
+            return
+
+        size = os.path.getsize(local_file)
+        print(f"Uploading {local_file} -> {remote_name} ({size} bytes)...")
+
+        success, result = self._upload_file(local_file, remote_name)
+        if success:
+            print(f"OK: {remote_name} uploaded ({result} bytes)")
+        else:
+            print(f"Error: {result}")
+
+    def do_ota_update(self, arg):
+        """Push changed files and reboot device
+        Usage: ota_update [--force] [directory]
+        Use --force to update all files regardless of size
+        """
+        args = arg.split()
+        force = "--force" in args
+        args = [a for a in args if a != "--force"]
+        directory = args[0] if args else "."
+
+        core_files = ["main.py", "http_server.py", "ualdes.py", "espicoW.py",
+                      "scheduler.py", "simple_esp.py", "config.py"]
+
+        # Get remote file info
+        print("Fetching device file list...")
+        data = self._request("/ota", silent=True)
+        if not data:
+            print("Error: Could not fetch device file list")
+            return
+        remote_files = {f["name"]: f for f in data.get("files", [])}
+
+        # Find changed files (by size or force all)
+        changed = []
+        for name in core_files:
+            path = os.path.join(directory, name)
+            if not os.path.exists(path):
+                continue
+            local_size = os.path.getsize(path)
+            remote = remote_files.get(name, {})
+            remote_size = remote.get("size", -1)
+            if force or local_size != remote_size:
+                status = "new" if remote_size == -1 else ("forced" if force and local_size == remote_size else "modified")
+                changed.append((path, name, local_size, status))
+
+        if not changed:
+            print("All files up to date")
+            return
+
+        print(f"\n{len(changed)} file(s) to update:")
+        for path, name, size, status in changed:
+            print(f"  [{status}] {name} ({size} bytes)")
+
+        confirm = input("\nProceed? [y/N] ")
+        if confirm.lower() != 'y':
+            print("Cancelled")
+            return
+
+        # Upload changed files
+        for i, (path, name, size, status) in enumerate(changed):
+            is_last = (i == len(changed) - 1)
+            print(f"Uploading {name} ({size} bytes){'  (reboot)' if is_last else ''}...", end=" ", flush=True)
+
+            success, result = self._upload_file(path, name, reboot=is_last)
+            if success:
+                print("OK")
+            else:
+                print(f"FAILED: {result}")
+                return
+
+        print("\nUpdate complete. Device is rebooting...")
 
     def do_quit(self, arg):
         """Exit the CLI"""

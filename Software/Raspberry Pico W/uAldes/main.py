@@ -36,8 +36,8 @@ import ualdes
 import json
 from config import WIFI_NETWORKS, UALDES_OPTIONS, HARDWARE_CONFIG, SERVICES, SCHEDULER_CONFIG
 
-RELEASE_DATE = "13_03_2026"
-VERSION = "4.1"
+RELEASE_DATE = "14_03_2026"
+VERSION = "4.3"
 
 # Boot count - persisted to file
 BOOTCOUNT_FILE = "bootcount.txt"

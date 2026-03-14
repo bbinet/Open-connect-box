@@ -24,7 +24,8 @@ class ESPicoW:
     TYPE_SSL = "SSL"
 
     def __init__(self, uart_id=0, tx_pin=0, rx_pin=1, baudrate=115200, debug=False):
-        self.uart = UART(uart_id, baudrate=baudrate, tx=Pin(tx_pin), rx=Pin(rx_pin))
+        # Use larger RX buffer for handling POST data
+        self.uart = UART(uart_id, baudrate=baudrate, tx=Pin(tx_pin), rx=Pin(rx_pin), rxbuf=4096)
         self.debug = debug
         self.timeout = 5000
         self.connections = {}
@@ -366,17 +367,31 @@ class ESPicoW:
         # Small delay to let more data arrive
         time.sleep_ms(20)
 
-        # Read data with timeout, waiting for complete HTTP request
+        # Read initial data
         while time.ticks_diff(time.ticks_ms(), start) < timeout:
             if self.uart.any():
                 response += self.uart.read()
-                # Check if we have a complete HTTP request (ends with \r\n\r\n)
-                if b'+IPD,' in response and b'\r\n\r\n' in response:
-                    # Wait a bit more to ensure all data is received
-                    time.sleep_ms(20)
-                    if self.uart.any():
-                        response += self.uart.read()
-                    break
+            # Check if we have +IPD header
+            if b'+IPD,' in response:
+                try:
+                    resp_str = response.decode('utf-8', 'ignore')
+                    ipd_pos = resp_str.find('+IPD,')
+                    comma1 = resp_str.index(',', ipd_pos)
+                    comma2 = resp_str.index(',', comma1 + 1)
+                    colon = resp_str.index(':', comma2)
+                    expected_len = int(resp_str[comma2+1:colon])
+                    data_start = colon + 1
+                    # Wait until we have all expected data
+                    if len(resp_str) >= data_start + expected_len:
+                        break
+                except:
+                    pass
+            time.sleep_ms(10)
+
+        # Final read to catch any remaining data
+        time.sleep_ms(50)
+        while self.uart.any():
+            response += self.uart.read()
             time.sleep_ms(10)
 
         if not response:
