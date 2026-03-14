@@ -76,11 +76,11 @@ class HttpServer:
 
     VERSION = "1.0"
 
-    def __init__(self, wifi, uart, port=80, stats_callback=None, scheduler=None, status_dict=None):
+    def __init__(self, wifi, uart, port=80, stats_callback=None, scheduler=None, status_callback=None):
         self.wifi = wifi
         self.uart = uart
         self.port = port
-        self.last_status = status_dict if status_dict is not None else {}
+        self.status_callback = status_callback
         self.running = False
         self.start_time = None
         self.request_count = 0
@@ -103,10 +103,15 @@ class HttpServer:
         self.wifi.stop_server()
         self.running = False
 
-    def update_status(self, status):
-        """Update the cached status data"""
-        if status:
-            self.last_status = status
+    def _get_status_data(self):
+        """Get status data with timestamp and staleness info"""
+        import utime
+        if self.status_callback:
+            status, status_time = self.status_callback()
+            current_time = utime.time()
+            age = current_time - status_time if status_time > 0 else -1
+            return status, status_time, age
+        return {}, 0, -1
 
     def handle_request(self, link_id, data):
         """Handle incoming HTTP request"""
@@ -136,12 +141,18 @@ class HttpServer:
         # Route requests
         if path == "/status":
             if test_mode:
-                # Inject fake data into last_status for testing
-                self.last_status.clear()
-                self.last_status.update(FAKE_STATUS)
-                response = json_response(FAKE_STATUS)
+                # Return fake data for testing
+                result = dict(FAKE_STATUS)
+                result["_updated_ago"] = 0
+                response = json_response(result)
             else:
-                response = json_response(self.last_status)
+                status, status_time, age = self._get_status_data()
+                result = dict(status) if status else {}
+                if age >= 0:
+                    result["_updated_ago"] = age
+                    if age > 120:  # More than 2 minutes
+                        result["_warning"] = f"Status is stale ({age}s old)"
+                response = json_response(result)
 
         elif path == "/auto":
             if test_mode:
@@ -216,13 +227,15 @@ class HttpServer:
             uptime_hours = uptime_mins // 60
             uptime_mins = uptime_mins % 60
             ip_info = self.wifi.get_ip()
+            status, status_time, age = self._get_status_data()
             info = {
                 "version": self.VERSION,
                 "uptime": f"{uptime_hours}h {uptime_mins}m",
                 "uptime_seconds": uptime_secs,
                 "ip": ip_info.get("station"),
                 "requests": self.request_count,
-                "status_cached": bool(self.last_status)
+                "status_cached": bool(status),
+                "status_age": age if age >= 0 else None
             }
             # Add system stats if callback provided
             if self.stats_callback:

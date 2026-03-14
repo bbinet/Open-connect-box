@@ -111,10 +111,19 @@ mqtt_client = None
 http_server = None
 scheduler = None
 last_status = {}  # Shared status for http_server and scheduler
+last_status_time = 0  # Timestamp when last_status was updated
 
 def get_last_status():
     """Get current device status (used by scheduler and http_server)"""
     return last_status
+
+def get_last_status_time():
+    """Get timestamp of last status update"""
+    return last_status_time
+
+def get_status_with_time():
+    """Get current device status and its timestamp"""
+    return last_status, last_status_time
 
 # Connect to WiFi
 def connect_wifi(max_attempts=10):
@@ -245,7 +254,7 @@ if SERVICES.get("http_enabled", False):
             "reconnection_count": reconnection_count
         }
 
-    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80), stats_callback=get_system_stats, scheduler=scheduler, status_dict=last_status)
+    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80), stats_callback=get_system_stats, scheduler=scheduler, status_callback=get_status_with_time)
     if http_server.start():
         ip_info = wifi.get_ip()
         print(f"HTTP API available at http://{ip_info['station']}/")
@@ -341,6 +350,7 @@ while True:
                         # Update shared status (used by http_server and scheduler)
                         last_status.clear()
                         last_status.update(decoded_data)
+                        last_status_time = current_time
 
                         # Publish to MQTT if enabled
                         if SERVICES.get("mqtt_enabled", False) and mqtt_client:

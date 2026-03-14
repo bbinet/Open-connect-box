@@ -206,7 +206,22 @@ def format_status(data):
     lines.append("|           ALDES STATUS              |")
     lines.append("+-------------------------------------+")
 
+    # Check for staleness warning
+    warning = data.get("_warning")
+    updated_ago = data.get("_updated_ago")
+
+    if warning:
+        lines.append(f"| ⚠️  {warning:<32} |")
+        lines.append("+-------------------------------------+")
+    elif updated_ago is not None and updated_ago >= 0:
+        age_str = f"Updated {updated_ago}s ago"
+        lines.append(f"| {age_str:^35} |")
+        lines.append("+-------------------------------------+")
+
     for key in sorted(data.keys()):
+        # Skip metadata fields
+        if key.startswith("_"):
+            continue
         value = data[key]
         label = FIELD_LABELS.get(key, key)
         unit = FIELD_UNITS.get(key, "")
@@ -229,6 +244,7 @@ INFO_LABELS = {
     "uptime_seconds": "Uptime (seconds)",
     "requests": "Requests",
     "status_cached": "Status cached",
+    "status_age": "Status age (s)",
     "boot_count": "Boot count",
     "reconnection_count": "Reconnections",
 }
