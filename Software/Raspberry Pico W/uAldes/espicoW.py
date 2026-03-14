@@ -423,3 +423,49 @@ class ESPicoW:
         """Clear UART receive buffer"""
         while self.uart.any():
             self.uart.read()
+
+    def configure_sntp(self, timezone_offset=0, server="pool.ntp.org"):
+        """Configure SNTP time synchronization
+
+        Args:
+            timezone_offset: Hours offset from UTC (e.g., 1 for CET, 2 for CEST)
+            server: NTP server address
+
+        Returns:
+            True if configuration successful
+        """
+        # AT+CIPSNTPCFG=<enable>,<timezone>,<server>
+        cmd = f'AT+CIPSNTPCFG=1,{timezone_offset},"{server}"'
+        resp = self._send_cmd(cmd, timeout=3000)
+        return "OK" in resp
+
+    def get_sntp_time(self):
+        """Get current time from SNTP
+
+        Returns:
+            Tuple (year, month, day, hour, minute, second) or None if failed
+        """
+        resp = self._send_cmd("AT+CIPSNTPTIME?", timeout=3000)
+        # Response format: +CIPSNTPTIME:Thu Jan 01 00:00:00 1970
+        # Or newer format: +CIPSNTPTIME:Mon Mar 13 21:30:00 2026
+        if "+CIPSNTPTIME:" in resp:
+            try:
+                # Extract time string after +CIPSNTPTIME:
+                time_str = resp.split("+CIPSNTPTIME:")[1].split("\r")[0].strip()
+                # Parse: "Mon Mar 13 21:30:00 2026"
+                parts = time_str.split()
+                if len(parts) >= 5:
+                    months = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+                              "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
+                    month = months.get(parts[1], 1)
+                    day = int(parts[2])
+                    time_parts = parts[3].split(":")
+                    hour = int(time_parts[0])
+                    minute = int(time_parts[1])
+                    second = int(time_parts[2])
+                    year = int(parts[4])
+                    return (year, month, day, hour, minute, second)
+            except Exception as e:
+                if self.debug:
+                    print(f"SNTP parse error: {e}")
+        return None

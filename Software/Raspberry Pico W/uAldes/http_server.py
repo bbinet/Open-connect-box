@@ -76,15 +76,16 @@ class HttpServer:
 
     VERSION = "1.0"
 
-    def __init__(self, wifi, uart, port=80, stats_callback=None):
+    def __init__(self, wifi, uart, port=80, stats_callback=None, scheduler=None, status_dict=None):
         self.wifi = wifi
         self.uart = uart
         self.port = port
-        self.last_status = {}
+        self.last_status = status_dict if status_dict is not None else {}
         self.running = False
         self.start_time = None
         self.request_count = 0
         self.stats_callback = stats_callback
+        self.scheduler = scheduler
 
     def start(self):
         """Start the HTTP server"""
@@ -135,6 +136,9 @@ class HttpServer:
         # Route requests
         if path == "/status":
             if test_mode:
+                # Inject fake data into last_status for testing
+                self.last_status.clear()
+                self.last_status.update(FAKE_STATUS)
                 response = json_response(FAKE_STATUS)
             else:
                 response = json_response(self.last_status)
@@ -274,6 +278,125 @@ class HttpServer:
                 "test_mode": "Add ?test=1 to any endpoint to get fake data without sending commands"
             }
             response = json_response(doc)
+
+        elif path == "/schedules":
+            import scheduler
+            action = params.get("action", "list")
+
+            if action == "list":
+                schedules = scheduler.get_schedules()
+                # Add execution info if scheduler is available
+                executions = {}
+                if self.scheduler:
+                    for exec_record in self.scheduler.today_executions:
+                        executions[exec_record["index"]] = exec_record
+                # Enrich schedules with execution data
+                enriched = []
+                for i, sched in enumerate(schedules):
+                    sched_copy = dict(sched)
+                    sched_copy["index"] = i
+                    if i in executions:
+                        sched_copy["executed"] = executions[i]
+                    enriched.append(sched_copy)
+                result = {"schedules": enriched}
+                if self.scheduler and self.scheduler.current_date:
+                    result["date"] = self.scheduler.current_date
+                response = json_response(result)
+
+            elif action == "add":
+                try:
+                    hour = int(params.get("hour", -1))
+                    minute = int(params.get("minute", 0))
+                    cmd_type = params.get("type", "")
+                    duration = params.get("duration")
+                    cmd_params = {"duration": int(duration)} if duration else None
+                    enabled = params.get("enabled", "1") == "1"
+
+                    index = scheduler.add_schedule(hour, minute, cmd_type, cmd_params, enabled)
+                    if index >= 0:
+                        response = json_response({"status": "ok", "index": index})
+                    else:
+                        response = json_response({"error": "Invalid schedule parameters"}, 400)
+                except Exception as e:
+                    response = json_response({"error": str(e)}, 400)
+
+            elif action == "edit":
+                try:
+                    index = int(params.get("index", -1))
+                    hour = int(params["hour"]) if "hour" in params else None
+                    minute = int(params["minute"]) if "minute" in params else None
+                    cmd_type = params.get("type")
+                    duration = params.get("duration")
+                    cmd_params = {"duration": int(duration)} if duration else None
+                    enabled = None
+                    if "enabled" in params:
+                        enabled = params["enabled"] == "1"
+
+                    result = scheduler.edit_schedule(index, hour, minute, cmd_type, cmd_params, enabled)
+                    if result:
+                        response = json_response({"status": "ok", "schedule": result})
+                    else:
+                        response = json_response({"error": "Invalid index or parameters"}, 400)
+                except Exception as e:
+                    response = json_response({"error": str(e)}, 400)
+
+            elif action == "remove":
+                try:
+                    index = int(params.get("index", -1))
+                    result = scheduler.remove_schedule(index)
+                    if result:
+                        response = json_response({"status": "ok", "removed": result})
+                    else:
+                        response = json_response({"error": "Invalid index"}, 400)
+                except Exception as e:
+                    response = json_response({"error": str(e)}, 400)
+
+            elif action == "enable":
+                try:
+                    index = int(params.get("index", -1))
+                    result = scheduler.enable_schedule(index, True)
+                    if result:
+                        response = json_response({"status": "ok", "schedule": result})
+                    else:
+                        response = json_response({"error": "Invalid index"}, 400)
+                except Exception as e:
+                    response = json_response({"error": str(e)}, 400)
+
+            elif action == "disable":
+                try:
+                    index = int(params.get("index", -1))
+                    result = scheduler.enable_schedule(index, False)
+                    if result:
+                        response = json_response({"status": "ok", "schedule": result})
+                    else:
+                        response = json_response({"error": "Invalid index"}, 400)
+                except Exception as e:
+                    response = json_response({"error": str(e)}, 400)
+
+            elif action == "clear":
+                scheduler.clear_schedules()
+                response = json_response({"status": "ok"})
+
+            else:
+                response = json_response({"error": "Unknown action"}, 400)
+
+        elif path == "/time":
+            if self.scheduler:
+                time_tuple = self.scheduler.get_current_time()
+                if time_tuple:
+                    response = json_response({
+                        "year": time_tuple[0],
+                        "month": time_tuple[1],
+                        "day": time_tuple[2],
+                        "hour": time_tuple[3],
+                        "minute": time_tuple[4],
+                        "second": time_tuple[5],
+                        "formatted": f"{time_tuple[0]}-{time_tuple[1]:02d}-{time_tuple[2]:02d} {time_tuple[3]:02d}:{time_tuple[4]:02d}:{time_tuple[5]:02d}"
+                    })
+                else:
+                    response = json_response({"error": "Time not synced"}, 400)
+            else:
+                response = json_response({"error": "Scheduler not enabled"}, 400)
 
         else:
             response = json_response({"error": "Not found", "see": "/help"}, 404)

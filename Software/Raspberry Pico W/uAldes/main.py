@@ -33,10 +33,11 @@ import utime
 from espicoW import ESPicoW
 
 import ualdes
-from config import WIFI_NETWORKS, UALDES_OPTIONS, HARDWARE_CONFIG, SERVICES
+import json
+from config import WIFI_NETWORKS, UALDES_OPTIONS, HARDWARE_CONFIG, SERVICES, SCHEDULER_CONFIG
 
-RELEASE_DATE = "02_03_2026"
-VERSION = "4.0"
+RELEASE_DATE = "13_03_2026"
+VERSION = "4.1"
 
 # Boot count - persisted to file
 BOOTCOUNT_FILE = "bootcount.txt"
@@ -108,6 +109,12 @@ print(f"Firmware version: {wifi.get_version()}")
 last_message = 0
 mqtt_client = None
 http_server = None
+scheduler = None
+last_status = {}  # Shared status for http_server and scheduler
+
+def get_last_status():
+    """Get current device status (used by scheduler and http_server)"""
+    return last_status
 
 # Connect to WiFi
 def connect_wifi(max_attempts=10):
@@ -212,6 +219,22 @@ if SERVICES.get("mqtt_enabled", False):
         SERVICES["mqtt_enabled"] = False
 
 
+# Initialize scheduler (if enabled) - before HTTP server so it can be passed
+if SCHEDULER_CONFIG.get("enabled", False):
+    from scheduler import Scheduler
+    scheduler = Scheduler(
+        wifi=wifi,
+        uart=uart,
+        timezone_offset=SCHEDULER_CONFIG.get("timezone_offset", 1),
+        ntp_server=SCHEDULER_CONFIG.get("ntp_server", "pool.ntp.org"),
+        status_callback=get_last_status
+    )
+    if scheduler.start():
+        print("Scheduler started")
+    else:
+        print("Warning: Scheduler failed to start")
+        scheduler = None
+
 # HTTP server (only if enabled)
 if SERVICES.get("http_enabled", False):
     from http_server import HttpServer
@@ -222,7 +245,7 @@ if SERVICES.get("http_enabled", False):
             "reconnection_count": reconnection_count
         }
 
-    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80), stats_callback=get_system_stats)
+    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80), stats_callback=get_system_stats, scheduler=scheduler, status_dict=last_status)
     if http_server.start():
         ip_info = wifi.get_ip()
         print(f"HTTP API available at http://{ip_info['station']}/")
@@ -298,6 +321,10 @@ while True:
         if SERVICES.get("http_enabled", False) and http_server:
             http_server.check_requests()
 
+        # Check scheduled commands
+        if scheduler:
+            scheduler.check()
+
         # Read UART data from STM32
         uart_data = uart.read()
 
@@ -311,9 +338,9 @@ while True:
                     decoded_data = ualdes.frame_decode(uart_data)
 
                     if decoded_data is not None:
-                        # Update HTTP server status
-                        if SERVICES.get("http_enabled", False) and http_server:
-                            http_server.update_status(decoded_data)
+                        # Update shared status (used by http_server and scheduler)
+                        last_status.clear()
+                        last_status.update(decoded_data)
 
                         # Publish to MQTT if enabled
                         if SERVICES.get("mqtt_enabled", False) and mqtt_client:

@@ -527,6 +527,136 @@ class UAldesCLI(cmd.Cmd):
     def complete_raw(self, text, line, begidx, endidx):
         return [s for s in self._get_command_names() if s.startswith(text)]
 
+    def do_schedules(self, arg):
+        """List all scheduled commands with their execution status"""
+        data = self._request("/schedules", is_status=False)
+        if data and not self.json_output:
+            schedules = data.get("schedules", [])
+            date = data.get("date", "unknown")
+            if not schedules:
+                print("No schedules configured")
+                print("\nUse 'schedule_add' to add a schedule")
+                return
+            print(f"+{'─'*60}+")
+            print(f"| {'SCHEDULES':^58} |")
+            print(f"| {'Date: ' + str(date):^58} |")
+            print(f"+{'─'*60}+")
+            for sched in schedules:
+                idx = sched.get("index", "?")
+                hour = sched.get("hour", 0)
+                minute = sched.get("minute", 0)
+                cmd = sched.get("command", {})
+                cmd_type = cmd.get("type", "?")
+                params = cmd.get("params", {})
+                enabled = "✓" if sched.get("enabled", True) else "✗"
+                executed = sched.get("executed")
+
+                param_str = ""
+                if params:
+                    param_str = " " + " ".join(f"{k}={v}" for k, v in params.items())
+
+                exec_str = ""
+                exec_output = None
+                if executed:
+                    exec_time = executed.get("time", "?")
+                    exec_status = "OK" if executed.get("success") else "FAIL"
+                    exec_str = f" [Executed at {exec_time}: {exec_status}]"
+                    exec_output = executed.get("output")
+
+                line = f"| {idx}: [{enabled}] {hour:02d}:{minute:02d} → {cmd_type}{param_str}{exec_str}"
+                print(f"{line:<61}|")
+                # Show output if present and not empty
+                if exec_output:
+                    if isinstance(exec_output, dict) and exec_output:
+                        for k, v in exec_output.items():
+                            out_line = f"|     {k}: {v}"
+                            print(f"{out_line:<61}|")
+                    elif not isinstance(exec_output, dict):
+                        out_line = f"|     Output: {exec_output}"
+                        print(f"{out_line:<61}|")
+            print(f"+{'─'*60}+")
+
+    def do_schedule_add(self, arg):
+        """Add a new scheduled command
+        Usage: schedule_add <hour> <minute> <command> [duration=N] [enabled=1|0]
+        Example: schedule_add 8 0 auto
+        Example: schedule_add 22 0 vacances duration=2
+        """
+        args = arg.split()
+        if len(args) < 3:
+            print("Usage: schedule_add <hour> <minute> <command> [duration=N]")
+            print("Commands: auto, boost, confort, vacances, temp, status")
+            return
+
+        params = {
+            "action": "add",
+            "hour": args[0],
+            "minute": args[1],
+            "type": args[2]
+        }
+        for a in args[3:]:
+            if "=" in a:
+                k, v = a.split("=", 1)
+                params[k] = v
+
+        self._request("/schedules", params)
+
+    def do_schedule_edit(self, arg):
+        """Edit an existing schedule
+        Usage: schedule_edit <index> [hour=H] [minute=M] [type=CMD] [duration=N] [enabled=1|0]
+        Example: schedule_edit 0 hour=9
+        Example: schedule_edit 1 enabled=0
+        """
+        args = arg.split()
+        if not args:
+            print("Usage: schedule_edit <index> [hour=H] [minute=M] [type=CMD] [enabled=1|0]")
+            return
+
+        params = {"action": "edit", "index": args[0]}
+        for a in args[1:]:
+            if "=" in a:
+                k, v = a.split("=", 1)
+                params[k] = v
+
+        self._request("/schedules", params)
+
+    def do_schedule_remove(self, arg):
+        """Remove a schedule
+        Usage: schedule_remove <index>
+        """
+        if not arg.strip():
+            print("Usage: schedule_remove <index>")
+            return
+        self._request("/schedules", {"action": "remove", "index": arg.strip()})
+
+    def do_schedule_enable(self, arg):
+        """Enable a schedule
+        Usage: schedule_enable <index>
+        """
+        if not arg.strip():
+            print("Usage: schedule_enable <index>")
+            return
+        self._request("/schedules", {"action": "enable", "index": arg.strip()})
+
+    def do_schedule_disable(self, arg):
+        """Disable a schedule
+        Usage: schedule_disable <index>
+        """
+        if not arg.strip():
+            print("Usage: schedule_disable <index>")
+            return
+        self._request("/schedules", {"action": "disable", "index": arg.strip()})
+
+    def do_schedule_clear(self, arg):
+        """Remove all schedules"""
+        self._request("/schedules", {"action": "clear"})
+
+    def do_time(self, arg):
+        """Show current device time (from NTP)"""
+        data = self._request("/time", is_status=False)
+        if data and not self.json_output and "formatted" in data:
+            print(f"Device time: {data['formatted']}")
+
     def do_quit(self, arg):
         """Exit the CLI"""
         self._save_history()

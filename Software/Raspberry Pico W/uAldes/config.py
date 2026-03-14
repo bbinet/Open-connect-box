@@ -36,6 +36,14 @@ UALDES_OPTIONS = {
     "refresh_time": 60  # Time in seconds to refresh data
 }
 
+# Scheduler configuration
+# Schedules are stored in schedules.json and managed via HTTP API or CLI
+SCHEDULER_CONFIG = {
+    "enabled": True,
+    "timezone_offset": 1,  # UTC+1 for France (winter), set to 2 for summer time (CEST)
+    "ntp_server": "pool.ntp.org",
+}
+
 # ITEMS_MAPPING for frame decoding
 # Type definitions:
 # 0: Return as is
