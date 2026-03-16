@@ -5,7 +5,8 @@
 SERVICES = {
     "mqtt_enabled": False,  # Set to True to enable MQTT
     "http_enabled": True,   # Set to True to enable HTTP API
-    "http_port": 80
+    "http_port": 80,
+    "repl_enabled": True    # Set to True to enable TCP REPL (mpremote over TCP)
 }
 
 # WiFi Configuration

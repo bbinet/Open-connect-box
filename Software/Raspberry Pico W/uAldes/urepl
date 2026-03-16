@@ -1,0 +1,395 @@
+#!/usr/bin/env python3
+"""
+urepl - TCP REPL Client for uAldes MicroPython devices
+Compatible with mpremote-like command syntax
+
+Usage:
+  urepl <host> [command] [args...]
+
+Examples:
+  urepl 192.168.1.79 ls
+  urepl 192.168.1.79 exec "print('hello')"
+  urepl 192.168.1.79 run script.py
+  urepl 192.168.1.79 cp local.py :remote.py
+  urepl 192.168.1.79 cat :main.py
+  urepl 192.168.1.79 repl
+"""
+
+import argparse
+import socket
+import sys
+import time
+
+
+class TcpRepl:
+    """Raw REPL client over TCP socket"""
+
+    CTRL_A = b'\x01'
+    CTRL_B = b'\x02'
+    CTRL_C = b'\x03'
+    CTRL_D = b'\x04'
+
+    def __init__(self, host, port=80, timeout=10):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self.sock = None
+        self.in_raw_mode = False
+
+    def connect(self):
+        """Connect to the device"""
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect((self.host, self.port))
+
+    def close(self):
+        """Close the connection"""
+        if self.sock:
+            try:
+                self.sock.close()
+            except:
+                pass
+            self.sock = None
+        self.in_raw_mode = False
+
+    def _read_all(self, timeout=0.5):
+        """Read all available data with timeout"""
+        self.sock.settimeout(timeout)
+        data = b''
+        try:
+            while True:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        except socket.timeout:
+            pass
+        self.sock.settimeout(self.timeout)
+        return data
+
+    def _read_until(self, ending, timeout=None):
+        """Read until a specific ending is found"""
+        if timeout:
+            self.sock.settimeout(timeout)
+        data = b''
+        start = time.time()
+        while True:
+            try:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+                if ending in data:
+                    break
+            except socket.timeout:
+                break
+            if timeout and (time.time() - start) > timeout:
+                break
+        if timeout:
+            self.sock.settimeout(self.timeout)
+        return data
+
+    def enter_raw_repl(self):
+        """Enter raw REPL mode"""
+        if self.in_raw_mode:
+            return True
+
+        # Clear any pending data
+        self._read_all(0.1)
+
+        # Enter raw REPL
+        self.sock.sendall(self.CTRL_A)
+        time.sleep(0.2)
+        response = self._read_until(b'>', timeout=3)
+
+        if b'raw REPL' in response:
+            self.in_raw_mode = True
+            # If we got soft reboot, clear the buffer
+            if b'soft reboot' in response:
+                self._read_all(0.3)
+            return True
+        return False
+
+    def exec_raw(self, code):
+        """Execute code in raw REPL mode and return output, error"""
+        if not self.in_raw_mode:
+            if not self.enter_raw_repl():
+                return None, "Failed to enter raw REPL"
+
+        if isinstance(code, str):
+            code = code.encode()
+
+        # Send code
+        self.sock.sendall(code)
+        # Execute with CTRL_D
+        self.sock.sendall(self.CTRL_D)
+
+        # Read response - wait for the terminating sequence
+        # Response format: OK\x04<output>\x04<error>\x04 followed by >
+        time.sleep(0.3)  # Wait for response to arrive
+        response = b''
+        self.sock.settimeout(2)
+        try:
+            while True:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+                # Check if we have complete response (ends with > after \x04)
+                if b'\x04>' in response or response.endswith(b'>'):
+                    break
+                time.sleep(0.1)  # Small delay between reads
+        except socket.timeout:
+            pass
+        self.sock.settimeout(self.timeout)
+
+        # Parse response: OK\x04<output>\x04<error>\x04>
+        if response.startswith(b'OK\x04'):
+            # Remove trailing > if present
+            if response.endswith(b'>'):
+                response = response[:-1]
+            # OK\x04 is 3 bytes, skip them
+            parts = response[3:].split(self.CTRL_D)
+            output = parts[0].decode() if len(parts) > 0 else ''
+            error = parts[1].decode() if len(parts) > 1 and parts[1] else None
+            return output, error
+        else:
+            return None, f"Unexpected response: {response!r}"
+
+    def exec_and_print(self, code, raw=False):
+        """Execute code and print result"""
+        output, error = self.exec_raw(code)
+        if output:
+            # If output is a repr string (starts/ends with quotes), decode it
+            if not raw and len(output) >= 2 and output[0] == output[-1] == "'":
+                try:
+                    output = eval(output)  # Safely decode escaped string
+                except:
+                    pass
+            print(output)
+        if error:
+            print(error, file=sys.stderr)
+            return False
+        return True
+
+
+def cmd_exec(repl, args):
+    """Execute Python expression"""
+    expr = args.expr[0] if args.expr else "None"
+    return repl.exec_and_print(expr)
+
+
+def cmd_eval(repl, args):
+    """Evaluate and print expression"""
+    expr = args.expr[0] if args.expr else "None"
+    return repl.exec_and_print(expr)
+
+
+def cmd_run(repl, args):
+    """Run local Python file on device"""
+    with open(args.file, 'r') as f:
+        code = f.read()
+    return repl.exec_and_print(code)
+
+
+def cmd_ls(repl, args):
+    """List files on device"""
+    path = args.path if args.path else "/"
+    # Execute import and build result in one expression using __import__
+    code = f"""(lambda os: '\\n'.join([f'{{os.stat("{path}" + ("/" if "{path}" != "/" else "") + f)[6]:8d}} {{f}}' for f in os.listdir('{path}')]))(__import__('os'))"""
+    return repl.exec_and_print(code)
+
+
+def cmd_cat(repl, args):
+    """Read file from device"""
+    path = args.path.lstrip(':')
+    # Return file content as expression (print doesn't work in our REPL)
+    code = f"open('{path}', 'r').read()"
+    return repl.exec_and_print(code)
+
+
+def cmd_cp(repl, args):
+    """Copy file to/from device"""
+    src = args.src
+    dst = args.dst
+
+    if src.startswith(':'):
+        # Copy from device to local
+        path = src.lstrip(':')
+        output, error = repl.exec_raw(f"open('{path}', 'r').read()")
+        if error:
+            print(f"Error reading {path}: {error}", file=sys.stderr)
+            return False
+        with open(dst, 'w') as f:
+            f.write(output)
+        print(f"Copied {path} -> {dst}")
+        return True
+    elif dst.startswith(':'):
+        # Copy from local to device
+        path = dst.lstrip(':')
+        with open(src, 'r') as f:
+            content = f.read()
+        # Escape content for Python string
+        content = content.replace('\\', '\\\\').replace("'", "\\'")
+        # Use repr for safe encoding
+        code = f"open('{path}', 'w').write({repr(content)})"
+        output, error = repl.exec_raw(code)
+        if error:
+            print(f"Error writing {path}: {error}", file=sys.stderr)
+            return False
+        print(f"Copied {src} -> {path}")
+        return True
+    else:
+        print("Error: one of src or dst must start with ':'", file=sys.stderr)
+        return False
+
+
+def cmd_rm(repl, args):
+    """Remove file from device"""
+    path = args.path.lstrip(':')
+    code = f"import os; os.remove('{path}')"
+    output, error = repl.exec_raw(code)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        return False
+    print(f"Removed {path}")
+    return True
+
+
+def cmd_mkdir(repl, args):
+    """Create directory on device"""
+    path = args.path.lstrip(':')
+    code = f"import os; os.mkdir('{path}')"
+    output, error = repl.exec_raw(code)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        return False
+    print(f"Created {path}")
+    return True
+
+
+def cmd_reset(repl, args):
+    """Reset device"""
+    repl.sock.sendall(repl.CTRL_D)
+    print("Device resetting...")
+    return True
+
+
+def cmd_repl(repl, args):
+    """Interactive REPL"""
+    print(f"Connected to {repl.host}:{repl.port}")
+    print("Type Python code. Press Ctrl+D to exit.")
+    print()
+
+    if not repl.enter_raw_repl():
+        print("Failed to enter raw REPL", file=sys.stderr)
+        return False
+
+    while True:
+        try:
+            line = input(">>> ")
+        except EOFError:
+            print()
+            break
+        except KeyboardInterrupt:
+            print("\nUse Ctrl+D to exit")
+            continue
+
+        if not line.strip():
+            continue
+
+        repl.exec_and_print(line)
+
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='TCP REPL Client for uAldes MicroPython devices',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__
+    )
+    parser.add_argument('host', help='Device IP address (e.g., 192.168.1.79)')
+    parser.add_argument('-p', '--port', type=int, default=80, help='Port (default: 80)')
+
+    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
+
+    # exec command
+    p_exec = subparsers.add_parser('exec', help='Execute Python expression')
+    p_exec.add_argument('expr', nargs=1, help='Python expression')
+
+    # eval command (alias for exec)
+    p_eval = subparsers.add_parser('eval', help='Evaluate Python expression')
+    p_eval.add_argument('expr', nargs=1, help='Python expression')
+
+    # run command
+    p_run = subparsers.add_parser('run', help='Run local Python file on device')
+    p_run.add_argument('file', help='Local Python file')
+
+    # ls command
+    p_ls = subparsers.add_parser('ls', help='List files on device')
+    p_ls.add_argument('path', nargs='?', default='/', help='Path to list')
+
+    # cat command
+    p_cat = subparsers.add_parser('cat', help='Read file from device')
+    p_cat.add_argument('path', help='File path (use :path for device files)')
+
+    # cp command
+    p_cp = subparsers.add_parser('cp', help='Copy file to/from device')
+    p_cp.add_argument('src', help='Source (use :path for device)')
+    p_cp.add_argument('dst', help='Destination (use :path for device)')
+
+    # rm command
+    p_rm = subparsers.add_parser('rm', help='Remove file from device')
+    p_rm.add_argument('path', help='File path')
+
+    # mkdir command
+    p_mkdir = subparsers.add_parser('mkdir', help='Create directory on device')
+    p_mkdir.add_argument('path', help='Directory path')
+
+    # reset command
+    subparsers.add_parser('reset', help='Reset device')
+
+    # repl command
+    subparsers.add_parser('repl', help='Interactive REPL')
+
+    args = parser.parse_args()
+
+    if not args.command:
+        # Default to interactive REPL
+        args.command = 'repl'
+
+    repl = TcpRepl(args.host, args.port)
+
+    try:
+        repl.connect()
+
+        commands = {
+            'exec': cmd_exec,
+            'eval': cmd_eval,
+            'run': cmd_run,
+            'ls': cmd_ls,
+            'cat': cmd_cat,
+            'cp': cmd_cp,
+            'rm': cmd_rm,
+            'mkdir': cmd_mkdir,
+            'reset': cmd_reset,
+            'repl': cmd_repl,
+        }
+
+        if args.command in commands:
+            success = commands[args.command](repl, args)
+            sys.exit(0 if success else 1)
+        else:
+            print(f"Unknown command: {args.command}", file=sys.stderr)
+            sys.exit(1)
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        repl.close()
+
+
+if __name__ == '__main__':
+    main()

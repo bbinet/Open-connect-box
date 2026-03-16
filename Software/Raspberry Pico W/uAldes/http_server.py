@@ -79,9 +79,9 @@ FAKE_STATUS = {
 class HttpServer:
     """Simple HTTP server for uAldes commands"""
 
-    VERSION = "1.0"
+    VERSION = "1.1"
 
-    def __init__(self, wifi, uart, port=80, stats_callback=None, scheduler=None, status_callback=None):
+    def __init__(self, wifi, uart, port=80, stats_callback=None, scheduler=None, status_callback=None, repl_enabled=False):
         self.wifi = wifi
         self.uart = uart
         self.port = port
@@ -91,6 +91,13 @@ class HttpServer:
         self.request_count = 0
         self.stats_callback = stats_callback
         self.scheduler = scheduler
+        self.repl_enabled = repl_enabled
+        self.tcp_repl = None
+        self.repl_connections = set()  # Track active REPL connections
+
+        if repl_enabled:
+            from tcp_repl import TcpRepl
+            self.tcp_repl = TcpRepl(wifi)
 
     def start(self):
         """Start the HTTP server"""
@@ -512,4 +519,34 @@ class HttpServer:
 
         incoming = self.wifi.check_incoming(timeout=500)
         for link_id, data in incoming:
+            # Handle closed connections
+            if data is None:
+                self.cleanup_repl_connection(link_id)
+                continue
+
+            # Check if this is a REPL connection
+            if link_id in self.repl_connections:
+                # Existing REPL connection - handle data
+                if self.tcp_repl:
+                    self.tcp_repl.handle_data(link_id, data)
+                continue
+
+            # Check if this is a new REPL connection (starts with control char)
+            if self.repl_enabled and self.tcp_repl:
+                first_byte = ord(data[0]) if isinstance(data, str) and len(data) > 0 else (data[0] if isinstance(data, bytes) and len(data) > 0 else -1)
+                # Detect REPL: any control character (< 0x20)
+                # HTTP requests start with "GET", "POST", etc. (>= 0x20)
+                if first_byte < 0x20:
+                    self.repl_connections.add(link_id)
+                    self.tcp_repl.handle_data(link_id, data)
+                    continue
+
+            # Regular HTTP request
             self.handle_request(link_id, data)
+
+    def cleanup_repl_connection(self, link_id):
+        """Clean up a closed REPL connection"""
+        if link_id in self.repl_connections:
+            self.repl_connections.discard(link_id)
+            if self.tcp_repl:
+                self.tcp_repl.close_session(link_id)

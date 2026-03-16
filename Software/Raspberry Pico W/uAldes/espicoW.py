@@ -355,6 +355,7 @@ class ESPicoW:
     def check_incoming(self, timeout=300):
         """Check for incoming data from clients
         Returns list of (link_id, data) tuples or empty list
+        Special data values: None means connection closed
         """
         start = time.ticks_ms()
         response = b""
@@ -399,6 +400,17 @@ class ESPicoW:
 
         try:
             resp_str = response.decode('utf-8', 'ignore')
+
+            # Parse closed connections (e.g., "0,CLOSED" or "1,CLOSED")
+            for line in resp_str.split('\r\n'):
+                if ',CLOSED' in line:
+                    try:
+                        link_id = int(line.split(',')[0])
+                        received.append((link_id, None))  # None means closed
+                    except:
+                        pass
+
+            # Parse incoming data
             idx = 0
             while True:
                 ipd_pos = resp_str.find('+IPD,', idx)

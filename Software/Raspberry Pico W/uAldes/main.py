@@ -37,7 +37,7 @@ import json
 from config import WIFI_NETWORKS, UALDES_OPTIONS, HARDWARE_CONFIG, SERVICES, SCHEDULER_CONFIG
 
 RELEASE_DATE = "16_03_2026"
-VERSION = "4.4"
+VERSION = "4.5"
 
 # Boot count - persisted to file
 BOOTCOUNT_FILE = "bootcount.txt"
@@ -254,10 +254,13 @@ if SERVICES.get("http_enabled", False):
             "reconnection_count": reconnection_count
         }
 
-    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80), stats_callback=get_system_stats, scheduler=scheduler, status_callback=get_status_with_time)
+    repl_enabled = SERVICES.get("repl_enabled", False)
+    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80), stats_callback=get_system_stats, scheduler=scheduler, status_callback=get_status_with_time, repl_enabled=repl_enabled)
     if http_server.start():
         ip_info = wifi.get_ip()
         print(f"HTTP API available at http://{ip_info['station']}/")
+        if repl_enabled:
+            print(f"TCP REPL enabled - connect with: mpremote connect socket://{ip_info['station']}:80")
     else:
         print("Warning: HTTP server failed to start")
         SERVICES["http_enabled"] = False
