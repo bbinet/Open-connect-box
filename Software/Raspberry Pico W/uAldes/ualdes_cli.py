@@ -723,6 +723,15 @@ class UAldesCLI(cmd.Cmd):
         if data and not self.json_output and "formatted" in data:
             print(f"Device time: {data['formatted']}")
 
+    def do_reboot(self, arg):
+        """Reboot the device"""
+        print("Rebooting device...")
+        try:
+            http_get(f"{self.base_url}/reboot", timeout=2)
+        except Exception:
+            pass  # Connection will be reset during reboot
+        print("Device is rebooting. Wait a few seconds before reconnecting.")
+
     def do_ota_list(self, arg):
         """List files on device"""
         data = self._request("/ota", silent=not self.json_output)

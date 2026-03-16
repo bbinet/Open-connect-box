@@ -507,6 +507,15 @@ class HttpServer:
                         except Exception as e:
                             response = json_response({"error": str(e)}, 400)
 
+        elif path == "/reboot":
+            response = json_response({"status": "ok", "message": "Rebooting..."})
+            self.wifi.send_response(link_id, response)
+            import utime
+            utime.sleep(1)
+            from machine import reset
+            reset()
+            return
+
         else:
             response = json_response({"error": "Not found", "see": "/help"}, 404)
 
