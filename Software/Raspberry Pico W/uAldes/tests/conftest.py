@@ -9,9 +9,9 @@ import sys
 import os
 import pytest
 
-# Add the uAldes directory to the path
-UALDES_DIR = os.path.join(os.path.dirname(__file__), '..', 'uAldes')
-sys.path.insert(0, UALDES_DIR)
+# Add the device directory to the path
+DEVICE_DIR = os.path.join(os.path.dirname(__file__), '..', 'device')
+sys.path.insert(0, DEVICE_DIR)
 
 
 # =============================================================================
