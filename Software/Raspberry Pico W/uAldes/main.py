@@ -36,8 +36,8 @@ import ualdes
 import json
 from config import WIFI_NETWORKS, UALDES_OPTIONS, HARDWARE_CONFIG, SERVICES, SCHEDULER_CONFIG
 
-RELEASE_DATE = "14_03_2026"
-VERSION = "4.3"
+RELEASE_DATE = "16_03_2026"
+VERSION = "4.4"
 
 # Boot count - persisted to file
 BOOTCOUNT_FILE = "bootcount.txt"
@@ -280,16 +280,20 @@ last_ping = utime.time()
 last_wifi_check = utime.time()
 ping_interval = 30
 wifi_check_interval = 60
-consecutive_failures = 0
+consecutive_ping_failures = 0
+MAX_PING_FAILURES = 3  # Reset after 3 consecutive ping failures
 
 
 def check_and_reconnect_wifi():
-    """Check WiFi and reconnect if needed."""
-    global consecutive_failures, reconnection_count
+    """Check WiFi connectivity and reconnect/reset if needed."""
+    global consecutive_ping_failures, reconnection_count
+
+    # First check WiFi connection status
     if not wifi.is_connected():
         print("WiFi disconnected. Attempting to reconnect...")
         led.off()
         reconnection_count += 1
+        consecutive_ping_failures = 0
         if not connect_wifi(max_attempts=5):
             print("Unable to reconnect to WiFi. Restarting...")
             reset()
@@ -297,7 +301,20 @@ def check_and_reconnect_wifi():
             try_reconnect_mqtt()
         if SERVICES.get("http_enabled", False) and http_server:
             http_server.start()
-        consecutive_failures = 0
+        return
+
+    # Ping 8.8.8.8 to verify internet connectivity
+    ping_result = wifi.ping("8.8.8.8")
+    if ping_result is None:
+        consecutive_ping_failures += 1
+        print(f"Ping failed ({consecutive_ping_failures}/{MAX_PING_FAILURES})")
+        if consecutive_ping_failures >= MAX_PING_FAILURES:
+            print("Internet unreachable. Restarting...")
+            reset()
+    else:
+        if consecutive_ping_failures > 0:
+            print(f"Ping OK ({ping_result}ms) - connectivity restored")
+        consecutive_ping_failures = 0
 
 
 while True:
