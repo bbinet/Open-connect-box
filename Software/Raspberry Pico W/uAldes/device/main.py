@@ -29,8 +29,8 @@ SOFTWARE.
 from machine import Pin, UART, reset, WDT
 import utime
 
-# Import ESPicoW for RP2040+ESP8285 WiFi
-from espicoW import ESPicoW
+# Import ESP8285 WiFi driver
+from esp8285 import ESP8285
 
 import ualdes
 import json
@@ -82,7 +82,7 @@ print(f"STM32 UART initialized on UART{HARDWARE_CONFIG['stm32_uart_id']} (TX: GP
 
 # Initialize ESP8285 WiFi module
 print("Initializing ESP8285 WiFi module...")
-wifi = ESPicoW(
+wifi = ESP8285(
     uart_id=HARDWARE_CONFIG["esp_uart_id"],
     tx_pin=HARDWARE_CONFIG["esp_tx_pin"],
     rx_pin=HARDWARE_CONFIG["esp_rx_pin"],
@@ -164,7 +164,7 @@ else:
 
 # MQTT functions (only if enabled)
 if SERVICES.get("mqtt_enabled", False):
-    from simple_esp import MQTTClient
+    from mqtt import MQTTClient
     from config import MQTT_CONFIG, MQTT_TOPICS
 
     def try_reconnect_mqtt(max_attempts=5):

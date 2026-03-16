@@ -1,7 +1,7 @@
 """
-Pytest tests for espicoW.py
+Pytest tests for esp8285.py (ESP8285 WiFi driver)
 
-Run with: pytest tests/test_espicoW.py -v
+Run with: pytest tests/test_esp8285.py -v
 """
 
 import pytest
@@ -84,8 +84,8 @@ class MockESPUart:
         return None
 
 
-class ESPicoWTestable:
-    """ESPicoW class with injectable UART for testing"""
+class ESP8285Testable:
+    """ESP8285 class with injectable UART for testing"""
 
     MODE_STATION = 1
     MODE_AP = 2
@@ -233,8 +233,8 @@ class ESPicoWTestable:
 
 @pytest.fixture
 def wifi():
-    """Provide a testable ESPicoW instance"""
-    return ESPicoWTestable()
+    """Provide a testable ESP8285 instance"""
+    return ESP8285Testable()
 
 
 @pytest.fixture
@@ -275,17 +275,17 @@ class TestWiFiMode:
 
     def test_set_station_mode(self, wifi):
         """Test setting station mode"""
-        assert wifi.set_mode(ESPicoWTestable.MODE_STATION) is True
+        assert wifi.set_mode(ESP8285Testable.MODE_STATION) is True
         assert wifi.uart.get_last_command() == "AT+CWMODE=1"
 
     def test_set_ap_mode(self, wifi):
         """Test setting AP mode"""
-        assert wifi.set_mode(ESPicoWTestable.MODE_AP) is True
+        assert wifi.set_mode(ESP8285Testable.MODE_AP) is True
         assert wifi.uart.get_last_command() == "AT+CWMODE=2"
 
     def test_set_both_mode(self, wifi):
         """Test setting station+AP mode"""
-        assert wifi.set_mode(ESPicoWTestable.MODE_BOTH) is True
+        assert wifi.set_mode(ESP8285Testable.MODE_BOTH) is True
         assert wifi.uart.get_last_command() == "AT+CWMODE=3"
 
 

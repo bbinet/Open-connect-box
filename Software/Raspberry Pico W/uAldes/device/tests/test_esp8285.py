@@ -1,8 +1,8 @@
 """
-Unit tests for espicoW.py
+Unit tests for esp8285.py (ESP8285 WiFi driver)
 
 These tests use a mock UART to simulate ESP8285 responses.
-Run on device with: import test_espicoW; test_espicoW.run_all_tests()
+Run on device with: import test_esp8285; test_esp8285.run_all_tests()
 """
 
 import time
@@ -136,11 +136,11 @@ class MockPin:
 
 
 # =============================================================================
-# ESPicoW with Mock UART
+# ESP8285 with Mock UART
 # =============================================================================
 
-class MockESPicoW:
-    """ESPicoW class that uses mock UART for testing"""
+class MockESP8285:
+    """ESP8285 class that uses mock UART for testing"""
 
     MODE_STATION = 1
     MODE_AP = 2
@@ -261,7 +261,7 @@ def test_at_command():
     """Test basic AT command"""
     print("\n--- AT Command Tests ---")
 
-    wifi = MockESPicoW()
+    wifi = MockESP8285()
     assert_true("at_command_ok", wifi.test())
 
 
@@ -269,7 +269,7 @@ def test_get_version():
     """Test getting firmware version"""
     print("\n--- Firmware Version Tests ---")
 
-    wifi = MockESPicoW()
+    wifi = MockESP8285()
     version = wifi.get_version()
     assert_true("version_contains_at", "AT version" in version)
     assert_true("version_contains_sdk", "SDK version" in version)
@@ -279,18 +279,18 @@ def test_set_mode():
     """Test setting WiFi mode"""
     print("\n--- WiFi Mode Tests ---")
 
-    wifi = MockESPicoW()
+    wifi = MockESP8285()
 
-    assert_true("set_mode_station", wifi.set_mode(MockESPicoW.MODE_STATION))
-    assert_true("set_mode_ap", wifi.set_mode(MockESPicoW.MODE_AP))
-    assert_true("set_mode_both", wifi.set_mode(MockESPicoW.MODE_BOTH))
+    assert_true("set_mode_station", wifi.set_mode(MockESP8285.MODE_STATION))
+    assert_true("set_mode_ap", wifi.set_mode(MockESP8285.MODE_AP))
+    assert_true("set_mode_both", wifi.set_mode(MockESP8285.MODE_BOTH))
 
 
 def test_wifi_connect():
     """Test WiFi connection"""
     print("\n--- WiFi Connection Tests ---")
 
-    wifi = MockESPicoW()
+    wifi = MockESP8285()
     connected = wifi.connect("TestSSID", "TestPassword")
     assert_true("wifi_connect_success", connected)
 
@@ -299,7 +299,7 @@ def test_wifi_disconnect():
     """Test WiFi disconnection"""
     print("\n--- WiFi Disconnection Tests ---")
 
-    wifi = MockESPicoW()
+    wifi = MockESP8285()
     disconnected = wifi.disconnect()
     assert_true("wifi_disconnect_success", disconnected)
 
@@ -308,7 +308,7 @@ def test_is_connected():
     """Test connection status check"""
     print("\n--- Connection Status Tests ---")
 
-    wifi = MockESPicoW()
+    wifi = MockESP8285()
     connected = wifi.is_connected()
     assert_true("is_connected_true", connected)
 
@@ -323,7 +323,7 @@ def test_get_ip():
     """Test getting IP address"""
     print("\n--- Get IP Tests ---")
 
-    wifi = MockESPicoW()
+    wifi = MockESP8285()
     ip_info = wifi.get_ip()
 
     assert_equal("station_ip", "192.168.1.100", ip_info['station'])
@@ -333,7 +333,7 @@ def test_multiple_connections():
     """Test enabling/disabling multiple connections"""
     print("\n--- Multiple Connections Tests ---")
 
-    wifi = MockESPicoW()
+    wifi = MockESP8285()
 
     assert_true("enable_mux", wifi.set_multiple_connections(True))
     assert_true("disable_mux", wifi.set_multiple_connections(False))
@@ -344,7 +344,7 @@ def test_command_sent_correctly():
     print("\n--- Command Format Tests ---")
 
     mock_uart = MockUART()
-    wifi = MockESPicoW(mock_uart)
+    wifi = MockESP8285(mock_uart)
 
     wifi.test()
     assert_true("at_sent", b"AT\r\n" in mock_uart.tx_buffer)
@@ -365,7 +365,7 @@ def run_all_tests():
     result = TestResult()
 
     print("=" * 50)
-    print("Running espicoW.py tests (with mocks)")
+    print("Running esp8285.py tests (with mocks)")
     print("=" * 50)
 
     test_at_command()

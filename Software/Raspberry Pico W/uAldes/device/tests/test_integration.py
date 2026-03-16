@@ -95,13 +95,13 @@ def test_esp8285_communication():
 
     try:
         from config import HARDWARE_CONFIG
-        from espicoW import ESPicoW
+        from esp8285 import ESP8285
     except ImportError as e:
         result.add_skip("esp8285_communication", f"Import error: {e}")
         return None
 
     try:
-        wifi = ESPicoW(
+        wifi = ESP8285(
             uart_id=HARDWARE_CONFIG['esp_uart_id'],
             tx_pin=HARDWARE_CONFIG['esp_tx_pin'],
             rx_pin=HARDWARE_CONFIG['esp_rx_pin'],
@@ -213,7 +213,7 @@ def test_mqtt_connection(wifi):
 
     try:
         from config import MQTT_CONFIG
-        from simple_esp import MQTTClient
+        from mqtt import MQTTClient
 
         # Check placeholder
         if MQTT_CONFIG["broker"] == "mqtt.broker.address":

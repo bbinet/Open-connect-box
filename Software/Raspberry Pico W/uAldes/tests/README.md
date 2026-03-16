@@ -46,8 +46,8 @@ tests/
 ├── requirements.txt     # Python dependencies
 ├── README.md            # This file
 ├── test_ualdes.py       # Tests for frame encoding/decoding
-├── test_espicoW.py      # Tests for ESP8285 WiFi driver
-└── test_simple_esp.py   # Tests for MQTT client
+├── test_esp8285.py      # Tests for ESP8285 WiFi driver
+└── test_mqtt.py         # Tests for MQTT client
 ```
 
 ## How Mocking Works
@@ -66,8 +66,8 @@ Since the device code uses MicroPython-specific modules (`machine`, `utime`, `ne
 For tests that run directly on the MicroPython device, see `device/tests/`:
 - `device/tests/run_tests.py` - Test runner
 - `device/tests/test_ualdes.py`
-- `device/tests/test_espicoW.py`
-- `device/tests/test_simple_esp.py`
+- `device/tests/test_esp8285.py`
+- `device/tests/test_mqtt.py`
 - `device/tests/test_integration.py`
 
 Run on device with:

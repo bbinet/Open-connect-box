@@ -1,5 +1,5 @@
 """
-ESPicoW - WiFi library for RP2040 with ESP8285 using AT commands
+ESP8285 - WiFi library for RP2040 with ESP8285 using AT commands
 
 This library provides WiFi connectivity for Pico W clones that use
 ESP8285 chip for WiFi instead of the CYW43439 on genuine Pico W.
@@ -12,7 +12,7 @@ from machine import UART, Pin
 import time
 
 
-class ESPicoW:
+class ESP8285:
     """WiFi library for RP2040 with ESP8285 using AT commands"""
 
     MODE_STATION = 1

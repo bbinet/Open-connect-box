@@ -141,7 +141,7 @@ class Scheduler:
     def __init__(self, wifi, uart, timezone_offset=1, ntp_server="pool.ntp.org", status_callback=None):
         """
         Args:
-            wifi: ESPicoW instance for NTP
+            wifi: ESP8285 instance for NTP
             uart: UART instance for sending commands
             timezone_offset: Hours from UTC (1 for CET, 2 for CEST)
             ntp_server: NTP server address

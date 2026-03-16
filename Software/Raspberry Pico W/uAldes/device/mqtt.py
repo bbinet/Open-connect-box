@@ -1,7 +1,7 @@
 """
-MQTT Client for ESP8285/ESPicoW
+MQTT Client for ESP8285/ESP8285
 
-This is a modified version of umqtt.simple that works with ESPicoW's
+This is a modified version of umqtt.simple that works with ESP8285's
 TCP connections instead of standard sockets.
 """
 
@@ -14,7 +14,7 @@ class MQTTException(Exception):
 
 
 class MQTTClient:
-    """MQTT Client that uses ESPicoW for TCP communication"""
+    """MQTT Client that uses ESP8285 for TCP communication"""
 
     def __init__(
         self,
@@ -33,7 +33,7 @@ class MQTTClient:
         self.user = user
         self.pswd = password
         self.keepalive = keepalive
-        self.wifi = wifi  # ESPicoW instance
+        self.wifi = wifi  # ESP8285 instance
         self.link_id = link_id
         self.pid = 0
         self.cb = None
@@ -45,13 +45,13 @@ class MQTTClient:
         self._rx_buffer = b""
 
     def _write(self, data):
-        """Send data over ESPicoW TCP connection"""
+        """Send data over ESP8285 TCP connection"""
         if isinstance(data, (bytes, bytearray)):
             data = bytes(data)
         return self.wifi.send(self.link_id, data)
 
     def _read(self, length, timeout=5000):
-        """Read data from ESPicoW TCP connection"""
+        """Read data from ESP8285 TCP connection"""
         start = time.ticks_ms()
         result = b""
 

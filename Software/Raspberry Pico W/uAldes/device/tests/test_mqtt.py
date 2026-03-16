@@ -1,8 +1,8 @@
 """
-Unit tests for simple_esp.py (MQTT Client for ESP8285)
+Unit tests for mqtt.py (MQTT Client)
 
 These tests use mock objects to simulate MQTT protocol exchanges.
-Run on device with: import test_simple_esp; test_simple_esp.run_all_tests()
+Run on device with: import test_mqtt; test_mqtt.run_all_tests()
 """
 
 import struct
@@ -67,11 +67,11 @@ def assert_is_not_none(name, value):
 
 
 # =============================================================================
-# Mock ESPicoW for MQTT testing
+# Mock ESP8285 for MQTT testing
 # =============================================================================
 
-class MockESPicoW:
-    """Mock ESPicoW that simulates TCP operations for MQTT testing"""
+class MockESP8285:
+    """Mock ESP8285 that simulates TCP operations for MQTT testing"""
 
     def __init__(self):
         self.connections = {}
@@ -138,7 +138,7 @@ class MockMQTTClient:
         self.user = user
         self.pswd = password
         self.keepalive = keepalive
-        self.wifi = wifi or MockESPicoW()
+        self.wifi = wifi or MockESP8285()
         self.link_id = link_id
         self.pid = 0
         self.cb = None
@@ -351,7 +351,7 @@ def test_wifi_connection_setup():
     """Test that MQTT client sets up WiFi connection correctly"""
     print("\n--- WiFi Connection Setup Tests ---")
 
-    wifi = MockESPicoW()
+    wifi = MockESP8285()
     client = MockMQTTClient("test_client", "broker.test.com", port=1883,
                             wifi=wifi, link_id=0)
 
@@ -369,7 +369,7 @@ def test_send_data_to_wifi():
     """Test that data is sent through WiFi correctly"""
     print("\n--- Send Data Tests ---")
 
-    wifi = MockESPicoW()
+    wifi = MockESP8285()
     client = MockMQTTClient("test_client", "broker.test.com", wifi=wifi)
 
     client._write(b"test data")
@@ -418,7 +418,7 @@ def run_all_tests():
     result = TestResult()
 
     print("=" * 50)
-    print("Running simple_esp.py tests (MQTT Client)")
+    print("Running mqtt.py tests (MQTT Client)")
     print("=" * 50)
 
     test_connect_packet_structure()

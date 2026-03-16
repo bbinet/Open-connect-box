@@ -10,8 +10,8 @@ Upload all test files to the device root:
 cd uAldes
 ./cli/urepl <device-ip> cp device/tests/run_tests.py /run_tests.py
 ./cli/urepl <device-ip> cp device/tests/test_ualdes.py /test_ualdes.py
-./cli/urepl <device-ip> cp device/tests/test_espicoW.py /test_espicoW.py
-./cli/urepl <device-ip> cp device/tests/test_simple_esp.py /test_simple_esp.py
+./cli/urepl <device-ip> cp device/tests/test_esp8285.py /test_esp8285.py
+./cli/urepl <device-ip> cp device/tests/test_mqtt.py /test_mqtt.py
 ./cli/urepl <device-ip> cp device/tests/test_integration.py /test_integration.py
 ```
 
@@ -58,16 +58,16 @@ test_ualdes.run_all_tests()
 |------|-------------|
 | `run_tests.py` | Test runner with `run_all()`, `run_quick()`, `run_hardware_test()` |
 | `test_ualdes.py` | Tests for Aldes frame encoding/decoding |
-| `test_espicoW.py` | Tests for ESP8285 WiFi driver (mocked UART) |
-| `test_simple_esp.py` | Tests for MQTT client |
+| `test_esp8285.py` | Tests for ESP8285 WiFi driver (mocked UART) |
+| `test_mqtt.py` | Tests for MQTT client |
 | `test_integration.py` | Hardware integration tests (requires real ESP8285 + WiFi) |
 
 ## Test Types
 
 ### Unit Tests (no hardware required)
 - `test_ualdes.py` - Pure logic tests
-- `test_espicoW.py` - Mocked UART tests
-- `test_simple_esp.py` - Mocked network tests
+- `test_esp8285.py` - Mocked UART tests
+- `test_mqtt.py` - Mocked network tests
 
 ### Hardware Tests (require real hardware)
 - `test_integration.py` - Full integration with ESP8285
@@ -85,11 +85,11 @@ uAldes Test Suite
   [PASS] test_encode_auto_mode
   ...
 
-[2/3] Running espicoW.py tests...
+[2/3] Running esp8285.py tests...
   [PASS] test_at_command
   ...
 
-[3/3] Running simple_esp.py tests...
+[3/3] Running mqtt.py tests...
   [PASS] test_connect_packet
   ...
 
@@ -97,8 +97,8 @@ uAldes Test Suite
 OVERALL TEST RESULTS
 ============================================================
   ualdes.py: [PASS]
-  espicoW.py: [PASS]
-  simple_esp.py: [PASS]
+  esp8285.py: [PASS]
+  mqtt.py: [PASS]
 ============================================================
 All tests PASSED!
 ============================================================

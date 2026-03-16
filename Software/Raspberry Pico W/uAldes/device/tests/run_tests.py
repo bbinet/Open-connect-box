@@ -34,27 +34,27 @@ def run_all():
         print(f"Error running ualdes tests: {e}")
         results.append(("ualdes.py", False))
 
-    # Run espicoW tests
-    print("\n[2/3] Running espicoW.py tests...")
+    # Run esp8285 tests
+    print("\n[2/3] Running esp8285.py tests...")
     gc.collect()
     try:
-        import test_espicoW
-        passed = test_espicoW.run_all_tests()
-        results.append(("espicoW.py", passed))
+        import test_esp8285
+        passed = test_esp8285.run_all_tests()
+        results.append(("esp8285.py", passed))
     except Exception as e:
-        print(f"Error running espicoW tests: {e}")
-        results.append(("espicoW.py", False))
+        print(f"Error running esp8285 tests: {e}")
+        results.append(("esp8285.py", False))
 
-    # Run simple_esp tests
-    print("\n[3/3] Running simple_esp.py tests...")
+    # Run mqtt tests
+    print("\n[3/3] Running mqtt.py tests...")
     gc.collect()
     try:
-        import test_simple_esp
-        passed = test_simple_esp.run_all_tests()
-        results.append(("simple_esp.py", passed))
+        import test_mqtt
+        passed = test_mqtt.run_all_tests()
+        results.append(("mqtt.py", passed))
     except Exception as e:
-        print(f"Error running simple_esp tests: {e}")
-        results.append(("simple_esp.py", False))
+        print(f"Error running mqtt tests: {e}")
+        results.append(("mqtt.py", False))
 
     # Summary
     print("\n" + "=" * 60)
@@ -107,9 +107,9 @@ def run_hardware_test():
     print(f"  Baudrate: {HARDWARE_CONFIG['esp_baudrate']}")
 
     try:
-        from espicoW import ESPicoW
+        from esp8285 import ESP8285
 
-        wifi = ESPicoW(
+        wifi = ESP8285(
             uart_id=HARDWARE_CONFIG['esp_uart_id'],
             tx_pin=HARDWARE_CONFIG['esp_tx_pin'],
             rx_pin=HARDWARE_CONFIG['esp_rx_pin'],

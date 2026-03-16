@@ -116,7 +116,8 @@ uAldes/
 │   ├── tests/              # On-device tests
 │   ├── config.py
 │   ├── main.py
-│   ├── espicoW.py
+│   ├── esp8285.py          # ESP8285 WiFi driver
+│   ├── mqtt.py             # MQTT client
 │   ├── http_server.py
 │   ├── scheduler.py
 │   ├── tcp_repl.py
@@ -133,8 +134,8 @@ uAldes/
 2. Transfer files from `device/` to the board:
    - `main.py`
    - `config.py` (create based on template above)
-   - `simple_esp.py` (MQTT library for ESP8285)
-   - `espicoW.py` (ESP8285 WiFi driver)
+   - `esp8285.py` (ESP8285 WiFi driver)
+   - `mqtt.py` (MQTT client)
    - `ualdes.py` (Aldes decoding library)
    - `http_server.py` (HTTP server)
    - `tcp_repl.py` (Remote REPL)

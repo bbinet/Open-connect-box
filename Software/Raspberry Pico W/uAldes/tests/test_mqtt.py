@@ -1,7 +1,7 @@
 """
-Pytest tests for simple_esp.py (MQTT Client)
+Pytest tests for mqtt.py (MQTT Client)
 
-Run with: pytest tests/test_simple_esp.py -v
+Run with: pytest tests/test_mqtt.py -v
 """
 
 import pytest
@@ -9,7 +9,7 @@ import struct
 
 
 class MockWiFi:
-    """Mock ESPicoW for MQTT testing"""
+    """Mock ESP8285 for MQTT testing"""
 
     def __init__(self):
         self.connections = {}
