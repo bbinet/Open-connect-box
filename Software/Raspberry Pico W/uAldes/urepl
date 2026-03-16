@@ -270,7 +270,7 @@ def cmd_mkdir(repl, args):
 
 def cmd_reset(repl, args):
     """Reset device"""
-    repl.sock.sendall(repl.CTRL_D)
+    repl.exec_raw("from machine import reset; reset()")
     print("Device resetting...")
     return True
 
