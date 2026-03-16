@@ -105,15 +105,40 @@ RP2040 + ESP8285 Board          STM32
 └─────────────────────┘
 ```
 
+## Project Structure
+
+```
+uAldes/
+├── cli/                    # PC tools
+│   ├── ualdes_cli.py       # CLI to interact with device
+│   └── urepl               # Remote REPL client
+├── device/                 # MicroPython code (runs on Pico)
+│   ├── tests/              # On-device tests
+│   ├── config.py
+│   ├── main.py
+│   ├── espicoW.py
+│   ├── http_server.py
+│   ├── scheduler.py
+│   ├── tcp_repl.py
+│   └── ualdes.py
+├── tests/                  # Pytest tests (runs on PC)
+│   ├── conftest.py
+│   └── test_*.py
+└── pytest.ini
+```
+
 ## Installation
 
 1. Flash MicroPython on your RP2040 board (use standard RP2040 MicroPython, NOT Pico W version)
-2. Transfer the following files to the board:
+2. Transfer files from `device/` to the board:
    - `main.py`
    - `config.py` (create based on template above)
    - `simple_esp.py` (MQTT library for ESP8285)
    - `espicoW.py` (ESP8285 WiFi driver)
    - `ualdes.py` (Aldes decoding library)
+   - `http_server.py` (HTTP server)
+   - `tcp_repl.py` (Remote REPL)
+   - `scheduler.py` (Task scheduler)
 
 ## Usage
 
@@ -123,6 +148,30 @@ Once configured and started, the system will:
 3. Establish a connection with the MQTT broker
 4. Listen for UART data and publish to corresponding topics
 5. Listen for MQTT commands and transmit via UART
+
+## Testing
+
+### PC Tests (pytest)
+
+Run the test suite on your PC (mocks MicroPython modules):
+
+```bash
+# NixOS
+nix-shell -p python3Packages.pytest --run "pytest tests/ -v"
+
+# Or with venv
+pip install -r tests/requirements.txt
+pytest tests/ -v
+```
+
+### On-Device Tests
+
+Upload test files from `device/tests/` to the Pico, then run:
+
+```python
+import run_tests
+run_tests.run_all()
+```
 
 ## Troubleshooting
 

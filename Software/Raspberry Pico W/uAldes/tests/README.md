@@ -1,54 +1,41 @@
-# uAldes Test Suite
+# uAldes Test Suite (PC)
 
 This directory contains pytest tests that can be run on a standard Python installation (not on the device).
 
 ## Setup
 
-1. Create a virtual environment (recommended):
-   ```bash
-   cd "Software/Raspberry Pico W"
-   python -m venv venv
-   source venv/bin/activate  # On Linux/Mac
-   # or: venv\Scripts\activate  # On Windows
-   ```
+### With NixOS:
+```bash
+cd uAldes
+nix-shell -p python3Packages.pytest --run "pytest tests/ -v"
+```
 
-2. Install dependencies:
-   ```bash
-   pip install -r tests/requirements.txt
-   ```
+### With venv:
+```bash
+cd uAldes
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+pip install -r tests/requirements.txt
+pytest tests/ -v
+```
 
 ## Running Tests
 
-### Run all tests:
 ```bash
-pytest
-```
+# Run all tests
+pytest tests/ -v
 
-### Run with verbose output:
-```bash
-pytest -v
-```
-
-### Run specific test file:
-```bash
+# Run specific test file
 pytest tests/test_ualdes.py -v
-pytest tests/test_espicoW.py -v
-pytest tests/test_simple_esp.py -v
-```
 
-### Run specific test class:
-```bash
+# Run specific test class
 pytest tests/test_ualdes.py::TestChecksum -v
-```
 
-### Run specific test:
-```bash
+# Run specific test
 pytest tests/test_ualdes.py::TestChecksum::test_checksum_calculation -v
-```
 
-### Run with coverage report:
-```bash
-pytest --cov=uAldes --cov-report=html
+# Run with coverage report
+pytest tests/ --cov=device --cov-report=html
 ```
 
 ## Test Structure
@@ -57,15 +44,15 @@ pytest --cov=uAldes --cov-report=html
 tests/
 ├── conftest.py          # Pytest configuration and MicroPython mocks
 ├── requirements.txt     # Python dependencies
-├── README.md           # This file
-├── test_ualdes.py      # Tests for frame encoding/decoding
-├── test_espicoW.py     # Tests for ESP8285 WiFi driver
-└── test_simple_esp.py  # Tests for MQTT client
+├── README.md            # This file
+├── test_ualdes.py       # Tests for frame encoding/decoding
+├── test_espicoW.py      # Tests for ESP8285 WiFi driver
+└── test_simple_esp.py   # Tests for MQTT client
 ```
 
 ## How Mocking Works
 
-Since the uAldes code uses MicroPython-specific modules (`machine`, `utime`, `network`, `rp2`), the `conftest.py` file provides mock implementations that allow the tests to run on standard Python.
+Since the device code uses MicroPython-specific modules (`machine`, `utime`, `network`, `rp2`), the `conftest.py` file provides mock implementations that allow the tests to run on standard Python.
 
 ### Mocked Modules:
 - `machine.Pin` - GPIO pin control
@@ -76,14 +63,14 @@ Since the uAldes code uses MicroPython-specific modules (`machine`, `utime`, `ne
 
 ## On-Device Tests
 
-For tests that run directly on the MicroPython device, see the test files in `uAldes/`:
-- `uAldes/test_ualdes.py`
-- `uAldes/test_espicoW.py`
-- `uAldes/test_simple_esp.py`
-- `uAldes/test_integration.py`
-- `uAldes/run_tests.py`
+For tests that run directly on the MicroPython device, see `device/tests/`:
+- `device/tests/run_tests.py` - Test runner
+- `device/tests/test_ualdes.py`
+- `device/tests/test_espicoW.py`
+- `device/tests/test_simple_esp.py`
+- `device/tests/test_integration.py`
 
-These can be run on the device with:
+Run on device with:
 ```python
 import run_tests
 run_tests.run_all()
