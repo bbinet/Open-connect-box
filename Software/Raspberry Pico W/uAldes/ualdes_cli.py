@@ -742,8 +742,7 @@ class UAldesCLI(cmd.Cmd):
             print(f"+{'─'*40}+")
             for f in files:
                 size = f.get("size", "?")
-                line = f"| {f['name']:<25} {size:>10} |"
-                print(line)
+                print(f"| {f['name']:<28} {size:>8} |")
             print(f"+{'─'*40}+")
 
     def _upload_file(self, local_path, remote_name, reboot=False):
