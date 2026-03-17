@@ -222,8 +222,16 @@ class Scheduler:
         self.last_check = current_ticks
 
         time_tuple = self.get_current_time()
-        if not time_tuple:
-            return
+        if not time_tuple or time_tuple[0] < 2020:
+            # Time not synced or invalid, try to resync
+            print("Scheduler: Time invalid, resyncing SNTP...")
+            self.wifi.configure_sntp(self.timezone_offset, self.ntp_server)
+            utime.sleep(2)
+            time_tuple = self.get_current_time()
+            if not time_tuple or time_tuple[0] < 2020:
+                print("Scheduler: SNTP resync failed")
+                return
+            print(f"Scheduler: Time resynced - {time_tuple[3]:02d}:{time_tuple[4]:02d}")
 
         year, month, day, hour, minute, second = time_tuple
         date_key = f"{year}-{month:02d}-{day:02d}"
@@ -232,6 +240,9 @@ class Scheduler:
         if self.current_date != date_key:
             self.today_executions = []
             self.current_date = date_key
+            # Resync SNTP at midnight
+            print("Scheduler: Midnight - resyncing SNTP...")
+            self.wifi.configure_sntp(self.timezone_offset, self.ntp_server)
 
         schedules = get_schedules()
         for i, schedule in enumerate(schedules):

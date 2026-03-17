@@ -291,7 +291,12 @@ def check_and_reconnect_wifi():
     """Check WiFi connectivity and reconnect/reset if needed."""
     global consecutive_ping_failures, reconnection_count
 
-    # First check WiFi connection status
+    # First verify ESP8285 is responsive (AT command test)
+    if not wifi.test():
+        print("ESP8285 not responding to AT command. Restarting...")
+        reset()
+
+    # Check WiFi connection status
     if not wifi.is_connected():
         print("WiFi disconnected. Attempting to reconnect...")
         led.off()
@@ -306,13 +311,14 @@ def check_and_reconnect_wifi():
             http_server.start()
         return
 
-    # Ping 8.8.8.8 to verify internet connectivity
-    ping_result = wifi.ping("8.8.8.8")
+    # Ping gateway to verify local connectivity
+    gateway = WIFI_NETWORKS.get("gateway", "192.168.1.1")
+    ping_result = wifi.ping(gateway)
     if ping_result is None:
         consecutive_ping_failures += 1
-        print(f"Ping failed ({consecutive_ping_failures}/{MAX_PING_FAILURES})")
+        print(f"Ping gateway failed ({consecutive_ping_failures}/{MAX_PING_FAILURES})")
         if consecutive_ping_failures >= MAX_PING_FAILURES:
-            print("Internet unreachable. Restarting...")
+            print("Gateway unreachable. Restarting...")
             reset()
     else:
         if consecutive_ping_failures > 0:
