@@ -81,7 +81,7 @@ class HttpServer:
 
     VERSION = "1.1"
 
-    def __init__(self, wifi, uart, port=80, stats_callback=None, scheduler=None, status_callback=None, repl_enabled=False):
+    def __init__(self, wifi, uart, port=80, stats_callback=None, scheduler=None, status_callback=None, repl_enabled=False, log_callback=None):
         self.wifi = wifi
         self.uart = uart
         self.port = port
@@ -92,6 +92,7 @@ class HttpServer:
         self.stats_callback = stats_callback
         self.scheduler = scheduler
         self.repl_enabled = repl_enabled
+        self.log_callback = log_callback
         self.tcp_repl = None
         self.repl_connections = set()  # Track active REPL connections
 
@@ -264,45 +265,22 @@ class HttpServer:
             response = json_response({"ualdes": True})
 
         elif path == "/" or path == "/help":
-            doc = {
-                "api": "uAldes HTTP API",
-                "version": self.VERSION,
-                "endpoints": {
-                    "/status": {
-                        "description": "Get current sensor data",
-                        "example": "curl http://{ip}/status"
-                    },
-                    "/auto": {
-                        "description": "Set automatic mode",
-                        "example": "curl http://{ip}/auto"
-                    },
-                    "/boost": {
-                        "description": "Set boost mode",
-                        "example": "curl http://{ip}/boost"
-                    },
-                    "/confort": {
-                        "description": "Set comfort mode for N days",
-                        "params": {"duration": "number of days (default: 2)"},
-                        "example": "curl 'http://{ip}/confort?duration=3'"
-                    },
-                    "/vacances": {
-                        "description": "Set vacation mode for N days",
-                        "params": {"duration": "number of days (default: 10)"},
-                        "example": "curl 'http://{ip}/vacances?duration=14'"
-                    },
-                    "/temp": {
-                        "description": "Set target temperature",
-                        "params": {"value": "temperature in Celsius"},
-                        "example": "curl 'http://{ip}/temp?value=21.5'"
-                    },
-                    "/info": {
-                        "description": "Get device info (version, uptime, IP)",
-                        "example": "curl http://{ip}/info"
-                    }
-                },
-                "test_mode": "Add ?test=1 to any endpoint to get fake data without sending commands"
-            }
-            response = json_response(doc)
+            # Build endpoints dict incrementally to reduce memory pressure
+            ep = {}
+            ep["/status"] = {"description": "Get sensor data"}
+            ep["/auto"] = {"description": "Set auto mode"}
+            ep["/boost"] = {"description": "Set boost mode"}
+            ep["/confort"] = {"description": "Set comfort mode", "params": {"duration": "days"}}
+            ep["/vacances"] = {"description": "Set vacation mode", "params": {"duration": "days"}}
+            ep["/temp"] = {"description": "Set temperature", "params": {"value": "celsius"}}
+            ep["/info"] = {"description": "Get device info"}
+            ep["/time"] = {"description": "Get device time"}
+            ep["/log"] = {"description": "Get debug logs", "params": {"lines": "count"}}
+            ep["/log_clear"] = {"description": "Clear debug logs"}
+            ep["/reboot"] = {"description": "Reboot device"}
+            ep["/schedules"] = {"description": "Manage schedules", "params": {"action": "list|add|edit|remove|clear", "hour": "0-23", "minute": "0-59", "type": "cmd", "index": "idx"}}
+            ep["/ota_list"] = {"description": "List files on device"}
+            response = json_response({"api": "uAldes HTTP API", "version": self.VERSION, "endpoints": ep})
 
         elif path == "/schedules":
             import scheduler
@@ -423,23 +401,24 @@ class HttpServer:
             else:
                 response = json_response({"error": "Scheduler not enabled"}, 400)
 
+        elif path == "/ota_list":
+            import os
+            try:
+                files = os.listdir("/")
+                file_info = []
+                for f in files:
+                    try:
+                        stat = os.stat(f)
+                        file_info.append({"name": f, "size": stat[6]})
+                    except:
+                        file_info.append({"name": f})
+                response = json_response({"files": file_info})
+            except Exception as e:
+                response = json_response({"error": str(e)}, 400)
+
         elif path == "/ota":
             import os
-            if method == "GET":
-                # List files on device with sizes
-                try:
-                    files = os.listdir("/")
-                    file_info = []
-                    for f in files:
-                        try:
-                            stat = os.stat(f)
-                            file_info.append({"name": f, "size": stat[6]})
-                        except:
-                            file_info.append({"name": f})
-                    response = json_response({"files": file_info})
-                except Exception as e:
-                    response = json_response({"error": str(e)}, 400)
-            elif method == "POST":
+            if method == "POST":
                 # Upload file - supports chunked uploads
                 filename = params.get("file")
                 chunk = params.get("chunk")  # chunk number (0-indexed)
@@ -506,6 +485,26 @@ class HttpServer:
                                 return
                         except Exception as e:
                             response = json_response({"error": str(e)}, 400)
+            else:
+                response = json_response({"error": "Use POST to upload, GET /ota_list to list files"}, 400)
+
+        elif path == "/log":
+            if self.log_callback:
+                lines = int(params.get("lines", 50))
+                all_lines = self.log_callback()
+                recent = all_lines[-lines:] if len(all_lines) > lines else list(all_lines)
+                response = json_response({"log": recent, "total_lines": len(all_lines)})
+            else:
+                response = json_response({"error": "Logging not configured"}, 404)
+
+        elif path == "/log_clear":
+            if self.log_callback:
+                # Clear the buffer by removing all items
+                buf = self.log_callback()
+                buf.clear()
+                response = json_response({"status": "ok", "message": "Log cleared"})
+            else:
+                response = json_response({"error": "Logging not configured"}, 404)
 
         elif path == "/reboot":
             response = json_response({"status": "ok", "message": "Rebooting..."})

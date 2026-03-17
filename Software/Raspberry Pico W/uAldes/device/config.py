@@ -6,13 +6,14 @@ SERVICES = {
     "mqtt_enabled": False,  # Set to True to enable MQTT
     "http_enabled": True,   # Set to True to enable HTTP API
     "http_port": 80,
-    "repl_enabled": True    # Set to True to enable TCP REPL (mpremote over TCP)
+    "repl_enabled": True,   # Set to True to enable TCP REPL (mpremote over TCP)
+    "debug_to_file": False  # Set to True to write logs to flash (wears flash, use for debugging only)
 }
 
 # WiFi Configuration
 WIFI_NETWORKS = {
-    "ssid": "REDACTED",
-    "password": "REDACTED",
+    "ssid": "YOUR_WIFI_SSID",
+    "password": "YOUR_WIFI_PASSWORD",
     "gateway": "192.168.1.1"
 }
 

@@ -319,6 +319,115 @@ def format_info(data):
     return "\n".join(lines)
 
 
+def format_time(data):
+    """Format time data"""
+    W = 37  # Same width as status/info
+    lines = []
+    lines.append("+" + "-" * W + "+")
+    lines.append(f"| {'DEVICE TIME':^{W-2}} |")
+    lines.append("+" + "-" * W + "+")
+    lines.append(f"| {data.get('formatted', 'unknown'):^{W-2}} |")
+    lines.append("+" + "-" * W + "+")
+    return "\n".join(lines)
+
+
+def format_log(data):
+    """Format log data"""
+    W = 60
+    logs = data.get("log", [])
+    total = data.get("total_lines", len(logs))
+    lines = []
+    lines.append("+" + "-" * W + "+")
+    lines.append(f"| {'DEBUG LOG':^{W-2}} |")
+    lines.append(f"| {f'Showing {len(logs)}/{total} lines':^{W-2}} |")
+    lines.append("+" + "-" * W + "+")
+    for log in logs:
+        if log.strip():
+            text = log[:W-2]  # Truncate if too long
+            lines.append(f"| {text:<{W-2}} |")
+    lines.append("+" + "-" * W + "+")
+    return "\n".join(lines)
+
+
+def format_schedules(data):
+    """Format schedules data"""
+    W = 60
+    schedules = data.get("schedules", [])
+    date = data.get("date", "unknown")
+    lines = []
+    lines.append("+" + "-" * W + "+")
+    lines.append(f"| {'SCHEDULES':^{W-2}} |")
+    lines.append(f"| {'Date: ' + str(date):^{W-2}} |")
+    lines.append("+" + "-" * W + "+")
+    if not schedules:
+        lines.append(f"| {'No schedules configured':^{W-2}} |")
+    for sched in schedules:
+        idx = sched.get("index", "?")
+        hour = sched.get("hour", 0)
+        minute = sched.get("minute", 0)
+        cmd = sched.get("command", {})
+        cmd_type = cmd.get("type", "?")
+        params = cmd.get("params", {})
+        enabled = "+" if sched.get("enabled", True) else "-"
+        executed = sched.get("executed")
+        param_str = ""
+        if params:
+            param_str = " " + " ".join(f"{k}={v}" for k, v in params.items())
+        exec_str = ""
+        if executed:
+            exec_time = executed.get("time", "?")
+            exec_status = "OK" if executed.get("success") else "FAIL"
+            exec_str = f" [{exec_time}: {exec_status}]"
+        text = f"{idx}: [{enabled}] {hour:02d}:{minute:02d} -> {cmd_type}{param_str}{exec_str}"
+        lines.append(f"| {text:<{W-2}} |")
+        # Show output if present
+        if executed:
+            exec_output = executed.get("output")
+            if exec_output and isinstance(exec_output, dict):
+                for k, v in exec_output.items():
+                    out_text = f"    {k}: {v}"[:W-2]
+                    lines.append(f"| {out_text:<{W-2}} |")
+    lines.append("+" + "-" * W + "+")
+    return "\n".join(lines)
+
+
+def format_files(data):
+    """Format file list"""
+    files = data.get("files", [])
+    lines = []
+    lines.append("+-------------------------------------+")
+    lines.append("|          FILES ON DEVICE            |")
+    lines.append("+-------------------------------------+")
+    for f in files:
+        name = f.get("name", "?")
+        size = f.get("size", "?")
+        lines.append(f"| {name:<26} {size:>8} |")
+    lines.append("+-------------------------------------+")
+    return "\n".join(lines)
+
+
+def format_help_api(data):
+    """Format API help"""
+    # Border is 50 dashes = 52 total, interior is 48 chars
+    endpoints = data.get("endpoints", {})
+    lines = []
+    lines.append("+--------------------------------------------------+")
+    lines.append("|                API DOCUMENTATION                 |")
+    title = data.get('api', 'uAldes API') + ' v' + data.get('version', '?')
+    lines.append(f"| {title:^48} |")
+    lines.append("+--------------------------------------------------+")
+    for ep, info in sorted(endpoints.items()):
+        desc = info.get("description", "")[:33]
+        lines.append(f"| {ep:<14}{desc:<34} |")
+        params = info.get("params", {})
+        if params:
+            for k, v in params.items():
+                pstr = f"{k}={v}"[:46]
+                lines.append(f"|   {pstr:<46} |")
+    lines.append("+--------------------------------------------------+")
+    return "\n".join(lines)
+
+
 def format_response(data):
     """Format command response for human-readable output"""
     if not data:
@@ -328,11 +437,33 @@ def format_response(data):
         return f"Error: {data['error']}"
 
     # Special formatting for info endpoint
-    if "uptime" in data and "version" in data:
+    if "uptime" in data and "version" in data and "ip" in data:
         return format_info(data)
 
+    # Time endpoint
+    if "formatted" in data and "hour" in data and "minute" in data:
+        return format_time(data)
+
+    # Log endpoint
+    if "log" in data and "total_lines" in data:
+        return format_log(data)
+
+    # Schedules endpoint
+    if "schedules" in data:
+        return format_schedules(data)
+
+    # Files list endpoint
+    if "files" in data:
+        return format_files(data)
+
+    # API help endpoint
+    if "endpoints" in data and "api" in data:
+        return format_help_api(data)
+
+    # Command success responses
     if "status" in data and data["status"] == "ok":
-        cmd = data.get("command", "?")
+        cmd = data.get("command", "")
+        msg = data.get("message", "")
         test = " (test)" if data.get("test") else ""
 
         if cmd == "auto":
@@ -348,8 +479,10 @@ def format_response(data):
         elif cmd == "temp":
             temp = data.get("temperature", "?")
             return f"OK: Temperature set to {temp}C{test}"
+        elif msg:
+            return f"OK: {msg}"
         else:
-            return f"OK: Command {cmd} executed{test}"
+            return "OK"
 
     return json.dumps(data, indent=2)
 
@@ -546,7 +679,7 @@ class UAldesCLI(cmd.Cmd):
     def do_help_api(self, arg):
         """Show full API documentation from device"""
         if self.api_doc:
-            print(json.dumps(self.api_doc, indent=2))
+            print(format_help_api(self.api_doc))
         else:
             print("API documentation not available.")
 
@@ -593,161 +726,9 @@ class UAldesCLI(cmd.Cmd):
     def complete_raw(self, text, line, begidx, endidx):
         return [s for s in self._get_command_names() if s.startswith(text)]
 
-    def do_schedules(self, arg):
-        """List all scheduled commands with their execution status"""
-        data = self._request("/schedules", silent=not self.json_output)
-        if data and not self.json_output:
-            schedules = data.get("schedules", [])
-            date = data.get("date", "unknown")
-            if not schedules:
-                print("No schedules configured")
-                print("\nUse 'schedule_add' to add a schedule")
-                return
-            print(f"+{'─'*60}+")
-            print(f"| {'SCHEDULES':^58} |")
-            print(f"| {'Date: ' + str(date):^58} |")
-            print(f"+{'─'*60}+")
-            for sched in schedules:
-                idx = sched.get("index", "?")
-                hour = sched.get("hour", 0)
-                minute = sched.get("minute", 0)
-                cmd = sched.get("command", {})
-                cmd_type = cmd.get("type", "?")
-                params = cmd.get("params", {})
-                enabled = "✓" if sched.get("enabled", True) else "✗"
-                executed = sched.get("executed")
-
-                param_str = ""
-                if params:
-                    param_str = " " + " ".join(f"{k}={v}" for k, v in params.items())
-
-                exec_str = ""
-                exec_output = None
-                if executed:
-                    exec_time = executed.get("time", "?")
-                    exec_status = "OK" if executed.get("success") else "FAIL"
-                    exec_str = f" [Executed at {exec_time}: {exec_status}]"
-                    exec_output = executed.get("output")
-
-                line = f"| {idx}: [{enabled}] {hour:02d}:{minute:02d} → {cmd_type}{param_str}{exec_str}"
-                print(f"{line:<61}|")
-                # Show output if present and not empty
-                if exec_output:
-                    if isinstance(exec_output, dict) and exec_output:
-                        for k, v in exec_output.items():
-                            out_line = f"|     {k}: {v}"
-                            print(f"{out_line:<61}|")
-                    elif not isinstance(exec_output, dict):
-                        out_line = f"|     Output: {exec_output}"
-                        print(f"{out_line:<61}|")
-            print(f"+{'─'*60}+")
-
-    def do_schedule_add(self, arg):
-        """Add a new scheduled command
-        Usage: schedule_add <hour> <minute> <command> [duration=N] [enabled=1|0]
-        Example: schedule_add 8 0 auto
-        Example: schedule_add 22 0 vacances duration=2
-        """
-        args = arg.split()
-        if len(args) < 3:
-            print("Usage: schedule_add <hour> <minute> <command> [duration=N]")
-            print("Commands: auto, boost, confort, vacances, temp, status")
-            return
-
-        params = {
-            "action": "add",
-            "hour": args[0],
-            "minute": args[1],
-            "type": args[2]
-        }
-        for a in args[3:]:
-            if "=" in a:
-                k, v = a.split("=", 1)
-                params[k] = v
-
-        self._request("/schedules", params)
-
-    def do_schedule_edit(self, arg):
-        """Edit an existing schedule
-        Usage: schedule_edit <index> [hour=H] [minute=M] [type=CMD] [duration=N] [enabled=1|0]
-        Example: schedule_edit 0 hour=9
-        Example: schedule_edit 1 enabled=0
-        """
-        args = arg.split()
-        if not args:
-            print("Usage: schedule_edit <index> [hour=H] [minute=M] [type=CMD] [enabled=1|0]")
-            return
-
-        params = {"action": "edit", "index": args[0]}
-        for a in args[1:]:
-            if "=" in a:
-                k, v = a.split("=", 1)
-                params[k] = v
-
-        self._request("/schedules", params)
-
-    def do_schedule_remove(self, arg):
-        """Remove a schedule
-        Usage: schedule_remove <index>
-        """
-        if not arg.strip():
-            print("Usage: schedule_remove <index>")
-            return
-        self._request("/schedules", {"action": "remove", "index": arg.strip()})
-
-    def do_schedule_enable(self, arg):
-        """Enable a schedule
-        Usage: schedule_enable <index>
-        """
-        if not arg.strip():
-            print("Usage: schedule_enable <index>")
-            return
-        self._request("/schedules", {"action": "enable", "index": arg.strip()})
-
-    def do_schedule_disable(self, arg):
-        """Disable a schedule
-        Usage: schedule_disable <index>
-        """
-        if not arg.strip():
-            print("Usage: schedule_disable <index>")
-            return
-        self._request("/schedules", {"action": "disable", "index": arg.strip()})
-
-    def do_schedule_clear(self, arg):
-        """Remove all schedules"""
-        self._request("/schedules", {"action": "clear"})
-
-    def do_time(self, arg):
-        """Show current device time (from NTP)"""
-        data = self._request("/time", silent=not self.json_output)
-        if data and not self.json_output and "formatted" in data:
-            print(f"Device time: {data['formatted']}")
-
-    def do_reboot(self, arg):
-        """Reboot the device"""
-        print("Rebooting device...")
-        try:
-            http_get(f"{self.base_url}/reboot", timeout=2)
-        except Exception:
-            pass  # Connection will be reset during reboot
-        print("Device is rebooting. Wait a few seconds before reconnecting.")
-
-    def do_ota_list(self, arg):
-        """List files on device"""
-        data = self._request("/ota", silent=not self.json_output)
-        if data and not self.json_output:
-            files = data.get("files", [])
-            print(f"+{'─'*40}+")
-            print(f"| {'FILES ON DEVICE':^38} |")
-            print(f"+{'─'*40}+")
-            for f in files:
-                size = f.get("size", "?")
-                print(f"| {f['name']:<29} {size:>8} |")
-            print(f"+{'─'*40}+")
-
     def _upload_file(self, local_path, remote_name, reboot=False):
         """Upload a file to device, using chunks if needed"""
-        CHUNK_SIZE = 1024  # 1KB chunks
+        CHUNK_SIZE = 512  # 512B chunks (smaller for reliability)
 
         try:
             with open(local_path, "r") as f:
@@ -786,7 +767,7 @@ class UAldesCLI(cmd.Cmd):
                     data = json.loads(response)
                     if data.get("status") != "ok":
                         return False, f"Chunk {i}: {data.get('error', 'Unknown error')}"
-                    time.sleep(0.3)  # Small delay between chunks
+                    time.sleep(0.5)  # Delay between chunks
                 except Exception as e:
                     if is_last and reboot and ("reset" in str(e).lower() or "connection" in str(e).lower()):
                         return True, "rebooting"

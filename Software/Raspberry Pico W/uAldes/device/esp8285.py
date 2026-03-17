@@ -287,6 +287,8 @@ class ESP8285:
 
     def ping(self, host):
         resp = self._send_cmd(f'AT+PING="{host}"', timeout=5000)
+        if self.debug:
+            print(f"PING {host} response: {repr(resp)}")
         if '+' in resp:
             try:
                 lines = resp.split('\n')

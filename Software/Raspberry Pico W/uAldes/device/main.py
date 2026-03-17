@@ -60,8 +60,45 @@ boot_count = load_bootcount() + 1
 save_bootcount(boot_count)
 reconnection_count = 0
 
+# Debug logging - in RAM by default to preserve flash
+MAX_LOG_LINES = 100
+_log_buffer = []  # In-memory log buffer (mutable, no global needed)
+_debug_to_file = SERVICES.get("debug_to_file", False)
+
+
+def log(message):
+    """Write debug message to RAM buffer (and optionally to file)"""
+    print(message)
+    entry = f"[{boot_count}] {message}"
+
+    # Store in RAM (trim old entries by modifying list in place)
+    _log_buffer.append(entry)
+    while len(_log_buffer) > MAX_LOG_LINES:
+        _log_buffer.pop(0)
+
+    # Optionally write to file (wears flash)
+    if _debug_to_file:
+        try:
+            import os
+            try:
+                if os.stat("debug.log")[6] > 10000:
+                    os.remove("debug.log")
+            except:
+                pass
+            with open("debug.log", "a") as f:
+                f.write(entry + "\n")
+        except:
+            pass
+
+
+def get_log_buffer():
+    """Get the in-memory log buffer (used by http_server)"""
+    return _log_buffer
+
+
 print(f"uAldes ESP8285 Version - Release Date: {RELEASE_DATE} - Version: {VERSION}")
 print(f"Boot count: {boot_count}")
+log(f"=== Boot {boot_count} ===")
 
 # Initialize LED
 led_pin = HARDWARE_CONFIG.get("led_pin", 25)
@@ -255,7 +292,7 @@ if SERVICES.get("http_enabled", False):
         }
 
     repl_enabled = SERVICES.get("repl_enabled", False)
-    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80), stats_callback=get_system_stats, scheduler=scheduler, status_callback=get_status_with_time, repl_enabled=repl_enabled)
+    http_server = HttpServer(wifi, uart, SERVICES.get("http_port", 80), stats_callback=get_system_stats, scheduler=scheduler, status_callback=get_status_with_time, repl_enabled=repl_enabled, log_callback=get_log_buffer)
     if http_server.start():
         ip_info = wifi.get_ip()
         print(f"HTTP API available at http://{ip_info['station']}/")
@@ -287,23 +324,35 @@ consecutive_ping_failures = 0
 MAX_PING_FAILURES = 3  # Reset after 3 consecutive ping failures
 
 
+consecutive_at_failures = 0
+MAX_AT_FAILURES = 5  # Reset after 5 consecutive AT command failures
+
+
 def check_and_reconnect_wifi():
     """Check WiFi connectivity and reconnect/reset if needed."""
-    global consecutive_ping_failures, reconnection_count
+    global consecutive_ping_failures, reconnection_count, consecutive_at_failures
 
     # First verify ESP8285 is responsive (AT command test)
     if not wifi.test():
-        print("ESP8285 not responding to AT command. Restarting...")
-        reset()
+        consecutive_at_failures += 1
+        log(f"ESP8285 AT failed ({consecutive_at_failures}/{MAX_AT_FAILURES})")
+        if consecutive_at_failures >= MAX_AT_FAILURES:
+            log("ESP8285 not responding. Restarting...")
+            reset()
+        return  # Skip other checks this round
+    else:
+        if consecutive_at_failures > 0:
+            log(f"ESP8285 AT OK (was {consecutive_at_failures} failures)")
+        consecutive_at_failures = 0
 
     # Check WiFi connection status
     if not wifi.is_connected():
-        print("WiFi disconnected. Attempting to reconnect...")
+        log("WiFi disconnected. Attempting to reconnect...")
         led.off()
         reconnection_count += 1
         consecutive_ping_failures = 0
         if not connect_wifi(max_attempts=5):
-            print("Unable to reconnect to WiFi. Restarting...")
+            log("Unable to reconnect to WiFi. Restarting...")
             reset()
         if SERVICES.get("mqtt_enabled", False):
             try_reconnect_mqtt()
@@ -311,18 +360,15 @@ def check_and_reconnect_wifi():
             http_server.start()
         return
 
-    # Ping gateway to verify local connectivity
+    # Ping gateway to verify connectivity (log only, no reset)
     gateway = WIFI_NETWORKS.get("gateway", "192.168.1.1")
     ping_result = wifi.ping(gateway)
     if ping_result is None:
         consecutive_ping_failures += 1
-        print(f"Ping gateway failed ({consecutive_ping_failures}/{MAX_PING_FAILURES})")
-        if consecutive_ping_failures >= MAX_PING_FAILURES:
-            print("Gateway unreachable. Restarting...")
-            reset()
+        log(f"Ping {gateway} failed ({consecutive_ping_failures})")
     else:
         if consecutive_ping_failures > 0:
-            print(f"Ping OK ({ping_result}ms) - connectivity restored")
+            log(f"Ping OK ({ping_result}ms) after {consecutive_ping_failures} failures")
         consecutive_ping_failures = 0
 
 
