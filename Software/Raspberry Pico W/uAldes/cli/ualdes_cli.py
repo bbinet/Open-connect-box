@@ -831,8 +831,8 @@ class UAldesCLI(cmd.Cmd):
         args = [a for a in args if a != "--force"]
         directory = args[0] if args else "."
 
-        core_files = ["main.py", "http_server.py", "ualdes.py", "espicoW.py",
-                      "scheduler.py", "simple_esp.py", "config.py"]
+        core_files = ["main.py", "http_server.py", "ualdes.py", "esp8285.py",
+                      "scheduler.py", "mqtt.py", "tcp_repl.py", "config.py"]
 
         # Get remote file info
         print("Fetching device file list...")
