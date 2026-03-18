@@ -726,6 +726,24 @@ class UAldesCLI(cmd.Cmd):
     def complete_raw(self, text, line, begidx, endidx):
         return [s for s in self._get_command_names() if s.startswith(text)]
 
+    def complete_ota_push(self, text, line, begidx, endidx):
+        """Complete file paths for ota_push"""
+        import glob
+        if text:
+            return glob.glob(text + '*')
+        return glob.glob('*')
+
+    def complete_ota_update(self, text, line, begidx, endidx):
+        """Complete options for ota_update"""
+        import glob
+        options = ['--force']
+        # Add directory completion
+        if text:
+            options.extend(glob.glob(text + '*/'))
+        else:
+            options.extend(glob.glob('*/'))
+        return [o for o in options if o.startswith(text)]
+
     def _upload_file(self, local_path, remote_name, reboot=False):
         """Upload a file to device, using chunks if needed"""
         CHUNK_SIZE = 512  # 512B chunks (smaller for reliability)
