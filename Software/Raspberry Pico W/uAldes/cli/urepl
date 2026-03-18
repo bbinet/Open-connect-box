@@ -201,9 +201,13 @@ def cmd_ls(repl, args):
 
 
 def cmd_cat(repl, args):
-    """Read file from device"""
+    """Read file from device (for small files, use cp for large files)"""
     path = args.path.lstrip(':')
-    # Return file content as expression (print doesn't work in our REPL)
+    # Check file size first
+    out, _ = repl.exec_raw(f"__import__('os').stat('{path}')[6]")
+    if out and int(out.strip()) > 4096:
+        print(f"Warning: file is large ({out.strip()} bytes), use 'cp :{path} localfile' instead", file=sys.stderr)
+    # Return file content as expression
     code = f"open('{path}', 'r').read()"
     return repl.exec_and_print(code)
 
@@ -212,32 +216,162 @@ def cmd_cp(repl, args):
     """Copy file to/from device"""
     src = args.src
     dst = args.dst
+    CHUNK_SIZE = 512  # Safe size for REPL commands
 
     if src.startswith(':'):
         # Copy from device to local
         path = src.lstrip(':')
-        output, error = repl.exec_raw(f"open('{path}', 'r').read()")
-        if error:
-            print(f"Error reading {path}: {error}", file=sys.stderr)
+
+        # Get file size first
+        out, err = repl.exec_raw(f"__import__('os').stat('{path}')[6]")
+        if err or not out:
+            print(f"Error reading {path}: {err or 'file not found'}", file=sys.stderr)
             return False
-        with open(dst, 'w') as f:
-            f.write(output)
-        print(f"Copied {path} -> {dst}")
+        file_size = int(out.strip())
+
+        if file_size <= CHUNK_SIZE:
+            # Small file - single read
+            output, error = repl.exec_raw(f"open('{path}', 'r').read()")
+            if error:
+                print(f"Error reading {path}: {error}", file=sys.stderr)
+                return False
+            with open(dst, 'w') as f:
+                f.write(output)
+        else:
+            # Large file - chunked download
+            import ast
+            total_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+            with open(dst, 'w') as f:
+                for i in range(total_chunks):
+                    offset = i * CHUNK_SIZE
+                    # Lambda to return value as single expression
+                    code = f"(lambda f:(f.seek({offset}),f.read({CHUNK_SIZE}),f.close())[1])(open('{path}','r'))"
+                    for attempt in range(3):
+                        out, err = repl.exec_raw(code)
+                        if out and not err:
+                            break
+                        if attempt < 2:
+                            time.sleep(0.5)
+                            repl.close()
+                            repl.connect()
+                            repl.in_raw_mode = False
+                            repl.enter_raw_repl()
+                    else:
+                        print(f"\nFailed to read chunk {i}/{total_chunks}", file=sys.stderr)
+                        return False
+                    # Decode repr string (raw REPL returns repr of the value)
+                    try:
+                        chunk_data = ast.literal_eval(out)
+                    except:
+                        chunk_data = out
+                    f.write(chunk_data)
+                    print(f"\rDownloading: {i+1}/{total_chunks} chunks", end="", flush=True)
+            print()
+
+        print(f"Copied {path} -> {dst} ({file_size} bytes)")
         return True
     elif dst.startswith(':'):
         # Copy from local to device
         path = dst.lstrip(':')
         with open(src, 'r') as f:
             content = f.read()
-        # Escape content for Python string
-        content = content.replace('\\', '\\\\').replace("'", "\\'")
-        # Use repr for safe encoding
-        code = f"open('{path}', 'w').write({repr(content)})"
-        output, error = repl.exec_raw(code)
-        if error:
-            print(f"Error writing {path}: {error}", file=sys.stderr)
-            return False
-        print(f"Copied {src} -> {path}")
+
+        if len(content) <= CHUNK_SIZE:
+            # Small file - single write
+            code = f"f=open('{path}','w');f.write({repr(content)});f.close()"
+            output, error = repl.exec_raw(code)
+            if error:
+                print(f"Error writing {path}: {error}", file=sys.stderr)
+                return False
+        else:
+            # Large file - chunked upload with separate chunk files
+            chunks = [content[i:i+CHUNK_SIZE] for i in range(0, len(content), CHUNK_SIZE)]
+            total = len(chunks)
+            chunk_prefix = f".{path}.chunk"
+
+            # Upload each chunk to a separate file
+            for i, chunk in enumerate(chunks):
+                chunk_file = f"{chunk_prefix}.{i}"
+                expected_size = len(chunk)
+                code = f"f=open('{chunk_file}','w');f.write({repr(chunk)});f.close()"
+
+                # Write chunk with retry
+                for attempt in range(3):
+                    output, error = repl.exec_raw(code)
+                    if error:
+                        if attempt < 2:
+                            print(f"\nRetrying chunk {i} (write)...", file=sys.stderr)
+                            time.sleep(1)
+                            repl.close()
+                            repl.connect()
+                            repl.in_raw_mode = False
+                            repl.enter_raw_repl()
+                        continue
+
+                    # Verify chunk size
+                    time.sleep(0.05)
+                    out, _ = repl.exec_raw(f"__import__('os').stat('{chunk_file}')[6]")
+                    if out and out.strip() and int(out.strip()) == expected_size:
+                        break
+                    if attempt < 2:
+                        print(f"\nRetrying chunk {i} (verify)...", file=sys.stderr)
+                        time.sleep(0.5)
+                        repl.close()
+                        repl.connect()
+                        repl.in_raw_mode = False
+                        repl.enter_raw_repl()
+                else:
+                    print(f"\nFailed to write chunk {i}/{total}", file=sys.stderr)
+                    # Cleanup chunk files on failure
+                    repl.exec_raw(f"exec(\"import os\\nfor j in range({i+1}):\\n try:\\n  os.remove('{chunk_prefix}.'+str(j))\\n except: pass\")")
+                    return False
+
+                print(f"\rUploading: {i+1}/{total} chunks", end="", flush=True)
+                time.sleep(0.1)
+
+            print()  # Newline after progress
+            print("Concatenating chunks...", end=" ", flush=True)
+
+            # Concatenate all chunks into final file
+            concat_code = f"""
+import os
+with open('{path}.tmp', 'w') as out:
+    for i in range({total}):
+        cf = '{chunk_prefix}.' + str(i)
+        with open(cf, 'r') as f:
+            out.write(f.read())
+        os.remove(cf)
+try:
+    os.remove('{path}')
+except:
+    pass
+os.rename('{path}.tmp', '{path}')
+"""
+            # Send as exec() to handle multiline
+            repl.exec_raw(f"exec({repr(concat_code)})")
+
+            # Verify final size
+            for attempt in range(3):
+                out, _ = repl.exec_raw(f"__import__('os').stat('{path}')[6]")
+                if out and out.strip():
+                    break
+                if attempt < 2:
+                    time.sleep(1)
+                    repl.close()
+                    repl.connect()
+                    repl.in_raw_mode = False
+                    repl.enter_raw_repl()
+
+            if not out or not out.strip():
+                print("FAILED (cannot verify)")
+                return False
+            remote_size = int(out.strip())
+            if remote_size != len(content):
+                print(f"FAILED (size {remote_size} != {len(content)})")
+                return False
+            print("OK")
+
+        print(f"Copied {src} -> {path} ({len(content)} bytes)")
         return True
     else:
         print("Error: one of src or dst must start with ':'", file=sys.stderr)
