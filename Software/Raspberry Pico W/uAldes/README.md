@@ -111,7 +111,7 @@ RP2040 + ESP8285 Board          STM32
 uAldes/
 ├── cli/                    # PC tools
 │   ├── ualdes_cli.py       # CLI to interact with device
-│   └── urepl               # Remote REPL client
+│   └── urepl.py            # Remote REPL client
 ├── device/                 # MicroPython code (runs on Pico)
 │   ├── tests/              # On-device tests
 │   ├── config.py

@@ -47,7 +47,9 @@ tests/
 ├── README.md            # This file
 ├── test_ualdes.py       # Tests for frame encoding/decoding
 ├── test_esp8285.py      # Tests for ESP8285 WiFi driver
-└── test_mqtt.py         # Tests for MQTT client
+├── test_mqtt.py         # Tests for MQTT client
+├── test_scheduler.py    # Tests for scheduler functions
+└── test_urepl.py        # Tests for TCP REPL client
 ```
 
 ## How Mocking Works

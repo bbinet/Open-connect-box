@@ -8,11 +8,11 @@ Upload all test files to the device root:
 ```bash
 # Using urepl
 cd uAldes
-./cli/urepl <device-ip> cp device/tests/run_tests.py /run_tests.py
-./cli/urepl <device-ip> cp device/tests/test_ualdes.py /test_ualdes.py
-./cli/urepl <device-ip> cp device/tests/test_esp8285.py /test_esp8285.py
-./cli/urepl <device-ip> cp device/tests/test_mqtt.py /test_mqtt.py
-./cli/urepl <device-ip> cp device/tests/test_integration.py /test_integration.py
+./cli/urepl.py <device-ip> cp device/tests/run_tests.py /run_tests.py
+./cli/urepl.py <device-ip> cp device/tests/test_ualdes.py /test_ualdes.py
+./cli/urepl.py <device-ip> cp device/tests/test_esp8285.py /test_esp8285.py
+./cli/urepl.py <device-ip> cp device/tests/test_mqtt.py /test_mqtt.py
+./cli/urepl.py <device-ip> cp device/tests/test_integration.py /test_integration.py
 ```
 
 ## Running Tests
@@ -21,16 +21,16 @@ cd uAldes
 
 ```bash
 # Run all tests
-./cli/urepl <device-ip> exec "import run_tests; run_tests.run_all()"
+./cli/urepl.py <device-ip> exec "import run_tests; run_tests.run_all()"
 
 # Run quick tests (ualdes only)
-./cli/urepl <device-ip> exec "import run_tests; run_tests.run_quick()"
+./cli/urepl.py <device-ip> exec "import run_tests; run_tests.run_quick()"
 
 # Run hardware connectivity test
-./cli/urepl <device-ip> exec "import run_tests; run_tests.run_hardware_test()"
+./cli/urepl.py <device-ip> exec "import run_tests; run_tests.run_hardware_test()"
 
 # Run specific test module
-./cli/urepl <device-ip> exec "import test_ualdes; test_ualdes.run_all_tests()"
+./cli/urepl.py <device-ip> exec "import test_ualdes; test_ualdes.run_all_tests()"
 ```
 
 ### Via REPL (serial/interactive)

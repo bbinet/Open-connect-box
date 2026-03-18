@@ -4,15 +4,15 @@ urepl - TCP REPL Client for uAldes MicroPython devices
 Compatible with mpremote-like command syntax
 
 Usage:
-  urepl <host> [command] [args...]
+  urepl.py <host> [command] [args...]
 
 Examples:
-  urepl 192.168.1.79 ls
-  urepl 192.168.1.79 exec "print('hello')"
-  urepl 192.168.1.79 run script.py
-  urepl 192.168.1.79 cp local.py :remote.py
-  urepl 192.168.1.79 cat :main.py
-  urepl 192.168.1.79 repl
+  ./urepl.py 192.168.1.79 ls
+  ./urepl.py 192.168.1.79 exec "print('hello')"
+  ./urepl.py 192.168.1.79 run script.py
+  ./urepl.py 192.168.1.79 cp local.py :remote.py
+  ./urepl.py 192.168.1.79 cat :main.py
+  ./urepl.py 192.168.1.79 repl
 """
 
 import argparse
