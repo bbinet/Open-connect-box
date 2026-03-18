@@ -19,8 +19,10 @@ def load_schedules():
 
 
 def save_schedules(schedules):
-    """Save schedules to file"""
+    """Save schedules to file (sorted by time)"""
     try:
+        # Sort schedules by hour, then minute
+        schedules.sort(key=lambda s: (s.get("hour", 0), s.get("minute", 0)))
         with open(SCHEDULES_FILE, "w") as f:
             json.dump({"schedules": schedules}, f)
         return True

@@ -287,21 +287,16 @@ class HttpServer:
             action = params.get("action", "list")
 
             if action == "list":
-                schedules = scheduler.get_schedules()
-                # Add execution info if scheduler is available
-                executions = {}
-                if self.scheduler:
-                    for exec_record in self.scheduler.today_executions:
-                        executions[exec_record["index"]] = exec_record
-                # Enrich schedules with execution data
-                enriched = []
+                schedules = scheduler.get_schedules()  # Already sorted
+                # Add index and execution info
                 for i, sched in enumerate(schedules):
-                    sched_copy = dict(sched)
-                    sched_copy["index"] = i
-                    if i in executions:
-                        sched_copy["executed"] = executions[i]
-                    enriched.append(sched_copy)
-                result = {"schedules": enriched}
+                    sched["index"] = i
+                    if self.scheduler:
+                        for rec in self.scheduler.today_executions:
+                            if rec["index"] == i:
+                                sched["executed"] = rec
+                                break
+                result = {"schedules": schedules}
                 if self.scheduler and self.scheduler.current_date:
                     result["date"] = self.scheduler.current_date
                 response = json_response(result)
