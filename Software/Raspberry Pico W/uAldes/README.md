@@ -141,6 +141,46 @@ uAldes/
    - `tcp_repl.py` (Remote REPL)
    - `scheduler.py` (Task scheduler)
 
+## CLI Tools
+
+### urepl.py - Remote REPL Client
+
+TCP REPL client compatible with mpremote syntax:
+
+```bash
+# List files
+./cli/urepl.py 192.168.1.79 ls
+
+# Execute Python code
+./cli/urepl.py 192.168.1.79 exec "print('hello')"
+
+# Copy files to/from device
+./cli/urepl.py 192.168.1.79 cp local.py :remote.py
+./cli/urepl.py 192.168.1.79 cp :remote.py local.py
+
+# Sync local files to device (OTA update)
+./cli/urepl.py 192.168.1.79 sync device/
+./cli/urepl.py 192.168.1.79 sync --force -r device/  # force + reboot
+
+# Interactive REPL
+./cli/urepl.py 192.168.1.79 repl
+
+# Reset device
+./cli/urepl.py 192.168.1.79 reset
+```
+
+### ualdes_cli.py - Device CLI
+
+Interactive CLI for device control:
+
+```bash
+./cli/ualdes_cli.py 192.168.1.79
+> status
+> schedules
+> auto
+> help
+```
+
 ## Usage
 
 Once configured and started, the system will:

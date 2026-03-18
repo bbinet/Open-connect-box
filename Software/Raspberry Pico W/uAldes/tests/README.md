@@ -52,6 +52,16 @@ tests/
 └── test_urepl.py        # Tests for TCP REPL client
 ```
 
+## Test Coverage
+
+| File | Tests |
+|------|-------|
+| test_ualdes.py | Checksum, frame encode/decode, temperature BCD |
+| test_esp8285.py | AT commands, WiFi connection, TCP sockets |
+| test_mqtt.py | Packet structure, connect/publish/subscribe |
+| test_scheduler.py | Add/edit/remove schedules, sorting, validation |
+| test_urepl.py | Connection, raw REPL protocol, all commands (exec, ls, cp, sync, etc.) |
+
 ## How Mocking Works
 
 Since the device code uses MicroPython-specific modules (`machine`, `utime`, `network`, `rp2`), the `conftest.py` file provides mock implementations that allow the tests to run on standard Python.

@@ -279,7 +279,6 @@ class HttpServer:
             ep["/log_clear"] = {"description": "Clear debug logs"}
             ep["/reboot"] = {"description": "Reboot device"}
             ep["/schedules"] = {"description": "Manage schedules", "params": {"action": "list|add|edit|remove|clear", "hour": "0-23", "minute": "0-59", "type": "cmd", "index": "idx"}}
-            ep["/ota_list"] = {"description": "List files on device"}
             response = json_response({"api": "uAldes HTTP API", "version": self.VERSION, "endpoints": ep})
 
         elif path == "/schedules":
@@ -395,93 +394,6 @@ class HttpServer:
                     response = json_response({"error": "Time not synced"}, 400)
             else:
                 response = json_response({"error": "Scheduler not enabled"}, 400)
-
-        elif path == "/ota_list":
-            import os
-            try:
-                files = os.listdir("/")
-                file_info = []
-                for f in files:
-                    try:
-                        stat = os.stat(f)
-                        file_info.append({"name": f, "size": stat[6]})
-                    except:
-                        file_info.append({"name": f})
-                response = json_response({"files": file_info})
-            except Exception as e:
-                response = json_response({"error": str(e)}, 400)
-
-        elif path == "/ota":
-            import os
-            if method == "POST":
-                # Upload file - supports chunked uploads
-                filename = params.get("file")
-                chunk = params.get("chunk")  # chunk number (0-indexed)
-                total = params.get("total")  # total chunks
-                reboot = params.get("reboot", "0") == "1"
-
-                if not filename or not body:
-                    response = json_response({"error": "Missing file param or body", "body_len": len(body) if body else 0}, 400)
-                else:
-                    # Use body directly (no base64)
-                    decoded = body
-
-                    if chunk is not None and total is not None:
-                        # Chunked upload
-                        try:
-                            chunk_num = int(chunk)
-                            total_chunks = int(total)
-                            tmp_file = filename + ".tmp"
-
-                            if chunk_num == 0:
-                                with open(tmp_file, "w") as f:
-                                    f.write(decoded)
-                            else:
-                                with open(tmp_file, "a") as f:
-                                    f.write(decoded)
-
-                            if chunk_num == total_chunks - 1:
-                                try:
-                                    os.remove(filename)
-                                except:
-                                    pass
-                                os.rename(tmp_file, filename)
-                                stat = os.stat(filename)
-                                response = json_response({"status": "ok", "file": filename, "size": stat[6], "chunks": total_chunks})
-                                if reboot:
-                                    self.wifi.send_response(link_id, response)
-                                    import utime
-                                    utime.sleep(1)
-                                    from machine import reset
-                                    reset()
-                                    return
-                            else:
-                                response = json_response({"status": "ok", "chunk": chunk_num, "total": total_chunks})
-                        except Exception as e:
-                            response = json_response({"error": str(e)}, 400)
-                    else:
-                        # Single upload (small file)
-                        try:
-                            tmp_file = filename + ".tmp"
-                            with open(tmp_file, "w") as f:
-                                f.write(decoded)
-                            try:
-                                os.remove(filename)
-                            except:
-                                pass
-                            os.rename(tmp_file, filename)
-                            response = json_response({"status": "ok", "file": filename, "size": len(decoded)})
-                            if reboot:
-                                self.wifi.send_response(link_id, response)
-                                import utime
-                                utime.sleep(1)
-                                from machine import reset
-                                reset()
-                                return
-                        except Exception as e:
-                            response = json_response({"error": str(e)}, 400)
-            else:
-                response = json_response({"error": "Use POST to upload, GET /ota_list to list files"}, 400)
 
         elif path == "/log":
             if self.log_callback:

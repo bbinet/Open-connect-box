@@ -12,6 +12,8 @@ Examples:
   ./urepl.py 192.168.1.79 run script.py
   ./urepl.py 192.168.1.79 cp local.py :remote.py
   ./urepl.py 192.168.1.79 cat :main.py
+  ./urepl.py 192.168.1.79 sync device/
+  ./urepl.py 192.168.1.79 sync --force -r device/
   ./urepl.py 192.168.1.79 repl
 """
 
@@ -409,6 +411,81 @@ def cmd_reset(repl, args):
     return True
 
 
+def cmd_sync(repl, args):
+    """Sync local files to device"""
+    import os
+
+    directory = args.directory or '.'
+    force = args.force
+
+    core_files = ["main.py", "http_server.py", "ualdes.py", "esp8285.py",
+                  "scheduler.py", "mqtt.py", "tcp_repl.py", "config.py"]
+
+    # Get remote file sizes
+    print("Fetching device file list...")
+    out, err = repl.exec_raw("__import__('json').dumps({f:__import__('os').stat(f)[6] for f in __import__('os').listdir('/') if f.endswith('.py')})")
+    if err:
+        print(f"Error: {err}", file=sys.stderr)
+        return False
+
+    try:
+        import json
+        import ast
+        # Output is a repr string like '{"file.py": 123}'
+        json_str = ast.literal_eval(out) if out.startswith("'") else out
+        remote_files = json.loads(json_str) if json_str else {}
+    except Exception as e:
+        print(f"Warning: Could not parse file list: {e}", file=sys.stderr)
+        remote_files = {}
+
+    # Find changed files
+    changed = []
+    for name in core_files:
+        path = os.path.join(directory, name)
+        if not os.path.exists(path):
+            continue
+        local_size = os.path.getsize(path)
+        remote_size = remote_files.get(name, -1)
+        if force or local_size != remote_size:
+            status = "new" if remote_size == -1 else ("forced" if force and local_size == remote_size else "modified")
+            changed.append((path, name, local_size, status))
+
+    if not changed:
+        print("All files up to date")
+        return True
+
+    print(f"\n{len(changed)} file(s) to update:")
+    for path, name, size, status in changed:
+        print(f"  [{status}] {name} ({size} bytes)")
+
+    confirm = input("\nProceed? [y/N] ")
+    if confirm.lower() != 'y':
+        print("Cancelled")
+        return True
+
+    # Upload changed files
+    class FakeArgs:
+        pass
+
+    for i, (path, name, size, status) in enumerate(changed):
+        print(f"Uploading {name}...", end=" ", flush=True)
+        fake_args = FakeArgs()
+        fake_args.src = path
+        fake_args.dst = f":{name}"
+        if cmd_cp(repl, fake_args):
+            print("OK")
+        else:
+            print("FAILED")
+            return False
+
+    # Reboot
+    if args.reboot:
+        print("Rebooting device...")
+        repl.exec_raw("from machine import reset; reset()")
+
+    return True
+
+
 def cmd_repl(repl, args):
     """Interactive REPL"""
     print(f"Connected to {repl.host}:{repl.port}")
@@ -484,6 +561,12 @@ def main():
     # reset command
     subparsers.add_parser('reset', help='Reset device')
 
+    # sync command
+    p_sync = subparsers.add_parser('sync', help='Sync local files to device')
+    p_sync.add_argument('directory', nargs='?', help='Local directory (default: .)')
+    p_sync.add_argument('--force', '-f', action='store_true', help='Force update all files')
+    p_sync.add_argument('--reboot', '-r', action='store_true', help='Reboot after sync')
+
     # repl command
     subparsers.add_parser('repl', help='Interactive REPL')
 
@@ -508,6 +591,7 @@ def main():
             'rm': cmd_rm,
             'mkdir': cmd_mkdir,
             'reset': cmd_reset,
+            'sync': cmd_sync,
             'repl': cmd_repl,
         }
 

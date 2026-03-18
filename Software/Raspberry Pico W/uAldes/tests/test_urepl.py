@@ -16,7 +16,7 @@ sys.path.insert(0, CLI_DIR)
 
 from urepl import (
     TcpRepl, cmd_exec, cmd_eval, cmd_run, cmd_ls, cmd_cat,
-    cmd_cp, cmd_rm, cmd_mkdir, cmd_reset
+    cmd_cp, cmd_rm, cmd_mkdir, cmd_reset, cmd_sync
 )
 
 
@@ -682,3 +682,106 @@ class TestExecAndPrint:
         captured = capsys.readouterr()
         assert "NameError" in captured.err
         assert result is False
+
+
+class TestCmdSync:
+    """Tests for sync command"""
+
+    @pytest.fixture
+    def mock_repl(self):
+        repl = MagicMock(spec=TcpRepl)
+        return repl
+
+    def test_sync_fetches_remote_files(self, mock_repl, tmp_path, capsys, monkeypatch):
+        """Test that sync fetches remote file list"""
+        # Create local files
+        (tmp_path / "main.py").write_text("print('hello')")
+
+        # Mock remote file list response
+        mock_repl.exec_raw.return_value = ('{"main.py": 100}', None)
+
+        monkeypatch.setattr('builtins.input', lambda _: 'n')
+
+        args = MockArgs(directory=str(tmp_path), force=False, reboot=False)
+        cmd_sync(mock_repl, args)
+
+        # Should have called exec_raw to get file list
+        assert mock_repl.exec_raw.called
+        call_args = mock_repl.exec_raw.call_args_list[0][0][0]
+        assert "listdir" in call_args
+
+    def test_sync_detects_modified_files(self, mock_repl, tmp_path, capsys, monkeypatch):
+        """Test that sync detects files with different sizes"""
+        # Create local file with different size than remote
+        (tmp_path / "main.py").write_text("x" * 200)
+
+        # Mock remote with different size
+        mock_repl.exec_raw.return_value = ('{"main.py": 100}', None)
+
+        # Mock input to cancel
+        monkeypatch.setattr('builtins.input', lambda _: 'n')
+
+        args = MockArgs(directory=str(tmp_path), force=False, reboot=False)
+        cmd_sync(mock_repl, args)
+
+        captured = capsys.readouterr()
+        assert "modified" in captured.out
+        assert "main.py" in captured.out
+
+    def test_sync_detects_new_files(self, mock_repl, tmp_path, capsys, monkeypatch):
+        """Test that sync detects new files not on device"""
+        # Create local file
+        (tmp_path / "main.py").write_text("content")
+
+        # Mock empty remote
+        mock_repl.exec_raw.return_value = ('{}', None)
+
+        monkeypatch.setattr('builtins.input', lambda _: 'n')
+
+        args = MockArgs(directory=str(tmp_path), force=False, reboot=False)
+        cmd_sync(mock_repl, args)
+
+        captured = capsys.readouterr()
+        assert "new" in captured.out
+
+    def test_sync_force_updates_all(self, mock_repl, tmp_path, capsys, monkeypatch):
+        """Test that --force updates all files regardless of size"""
+        # Create local file with same size as remote
+        (tmp_path / "main.py").write_text("x" * 100)
+
+        # Mock remote with same size
+        mock_repl.exec_raw.return_value = ('{"main.py": 100}', None)
+
+        monkeypatch.setattr('builtins.input', lambda _: 'n')
+
+        args = MockArgs(directory=str(tmp_path), force=True, reboot=False)
+        cmd_sync(mock_repl, args)
+
+        captured = capsys.readouterr()
+        assert "forced" in captured.out
+
+    def test_sync_all_up_to_date(self, mock_repl, tmp_path, capsys):
+        """Test sync when all files are up to date"""
+        # Create local file with same size as remote
+        (tmp_path / "main.py").write_text("x" * 100)
+
+        # Mock remote with same size
+        mock_repl.exec_raw.return_value = ('{"main.py": 100}', None)
+
+        args = MockArgs(directory=str(tmp_path), force=False, reboot=False)
+        result = cmd_sync(mock_repl, args)
+
+        assert result is True
+        captured = capsys.readouterr()
+        assert "up to date" in captured.out
+
+    def test_sync_handles_error(self, mock_repl, tmp_path, capsys):
+        """Test sync handles remote errors"""
+        mock_repl.exec_raw.return_value = (None, "Connection error")
+
+        args = MockArgs(directory=str(tmp_path), force=False, reboot=False)
+        result = cmd_sync(mock_repl, args)
+
+        assert result is False
+        captured = capsys.readouterr()
+        assert "Error" in captured.err
