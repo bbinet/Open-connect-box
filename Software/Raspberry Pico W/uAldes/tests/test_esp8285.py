@@ -422,3 +422,182 @@ class TestCommandFormat:
         wifi.connect("Test SSID", "Test Pass")
         commands = b"".join(wifi.uart.tx_buffer).decode()
         assert 'AT+CWJAP="Test SSID","Test Pass"' in commands
+
+
+class MockESPUartWithSend(MockESPUart):
+    """Mock UART that simulates ESP8285 AT command responses including CIPSEND"""
+
+    def __init__(self):
+        super().__init__()
+        self.send_data_buffer = []
+        self.waiting_for_data = False
+        self.expected_data_len = 0
+
+    def write(self, data):
+        """Simulate writing to UART"""
+        if isinstance(data, str):
+            data = data.encode()
+
+        # If we're waiting for data after AT+CIPSEND
+        if self.waiting_for_data:
+            self.send_data_buffer.append(data)
+            self.waiting_for_data = False
+            self.rx_buffer += b"SEND OK\r\n"
+            return len(data)
+
+        self.tx_buffer.append(data)
+        cmd_str = data.decode().strip()
+
+        # Handle AT+CIPSEND command
+        if cmd_str.startswith("AT+CIPSEND="):
+            # Parse: AT+CIPSEND=link_id,length
+            parts = cmd_str.split("=")[1].split(",")
+            self.expected_data_len = int(parts[1])
+            self.waiting_for_data = True
+            self.rx_buffer += b"AT+CIPSEND\r\n\r\n>"
+            return len(data)
+
+        # Handle other commands
+        for pattern, response in self.responses.items():
+            if cmd_str == pattern or cmd_str.startswith(pattern.split("=")[0] + "="):
+                self.rx_buffer += response
+                return len(data)
+
+        self.rx_buffer += b"ERROR\r\n"
+        return len(data)
+
+
+class ESP8285TestableWithSend(ESP8285Testable):
+    """ESP8285 class with send() method for testing chunked sends"""
+
+    CHUNK_SIZE = 1024  # Same as in real implementation
+
+    def __init__(self, mock_uart=None):
+        super().__init__(mock_uart)
+        self.uart = mock_uart or MockESPUartWithSend()
+
+    def send(self, link_id, data):
+        """Send data with chunking (mirrors real implementation)"""
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+
+        offset = 0
+        total = len(data)
+
+        while offset < total:
+            chunk = data[offset:offset + self.CHUNK_SIZE]
+            chunk_len = len(chunk)
+
+            cmd = f"AT+CIPSEND={link_id},{chunk_len}"
+            resp = self._send_cmd(cmd, timeout=1000, wait_for=">")
+            if ">" not in resp:
+                return False
+
+            self.uart.write(chunk)
+            start = std_time.time() * 1000
+            response = b""
+            success = False
+            while (std_time.time() * 1000 - start) < 5000:
+                if self.uart.any():
+                    chunk_resp = self.uart.read()
+                    if chunk_resp:
+                        response += chunk_resp
+                    resp_str = response.decode('utf-8', 'ignore')
+                    if "SEND OK" in resp_str:
+                        success = True
+                        break
+                    if "SEND FAIL" in resp_str or "ERROR" in resp_str:
+                        return False
+                std_time.sleep(0.001)
+
+            if not success:
+                return False
+
+            offset += chunk_len
+
+        return True
+
+
+@pytest.fixture
+def wifi_with_send():
+    """Provide a testable ESP8285 instance with send capability"""
+    return ESP8285TestableWithSend()
+
+
+class TestSendChunking:
+    """Tests for send() with chunking for large payloads"""
+
+    def test_send_small_data_single_chunk(self, wifi_with_send):
+        """Test that small data is sent in a single chunk"""
+        data = b"Hello World"  # 11 bytes, well under 1024
+        result = wifi_with_send.send(0, data)
+        assert result is True
+        # Should have one CIPSEND command
+        cipsend_cmds = [cmd for cmd in wifi_with_send.uart.tx_buffer
+                        if b"AT+CIPSEND" in cmd]
+        assert len(cipsend_cmds) == 1
+        assert b"AT+CIPSEND=0,11" in cipsend_cmds[0]
+
+    def test_send_exact_chunk_size(self, wifi_with_send):
+        """Test sending data exactly equal to chunk size"""
+        data = b"X" * 1024  # Exactly 1024 bytes
+        result = wifi_with_send.send(0, data)
+        assert result is True
+        cipsend_cmds = [cmd for cmd in wifi_with_send.uart.tx_buffer
+                        if b"AT+CIPSEND" in cmd]
+        assert len(cipsend_cmds) == 1
+
+    def test_send_large_data_multiple_chunks(self, wifi_with_send):
+        """Test that large data is split into multiple chunks"""
+        data = b"X" * 2500  # 2500 bytes = 3 chunks (1024 + 1024 + 452)
+        result = wifi_with_send.send(0, data)
+        assert result is True
+        cipsend_cmds = [cmd for cmd in wifi_with_send.uart.tx_buffer
+                        if b"AT+CIPSEND" in cmd]
+        assert len(cipsend_cmds) == 3
+        # Verify chunk sizes
+        assert b"AT+CIPSEND=0,1024" in cipsend_cmds[0]
+        assert b"AT+CIPSEND=0,1024" in cipsend_cmds[1]
+        assert b"AT+CIPSEND=0,452" in cipsend_cmds[2]
+
+    def test_send_data_integrity(self, wifi_with_send):
+        """Test that all data chunks are sent correctly"""
+        data = b"ABCD" * 500  # 2000 bytes
+        result = wifi_with_send.send(0, data)
+        assert result is True
+        # Verify data was sent
+        sent_data = b"".join(wifi_with_send.uart.send_data_buffer)
+        assert sent_data == data
+
+    def test_send_string_converted_to_bytes(self, wifi_with_send):
+        """Test that string data is converted to bytes"""
+        data = "Hello World"
+        result = wifi_with_send.send(0, data)
+        assert result is True
+        assert wifi_with_send.uart.send_data_buffer[0] == b"Hello World"
+
+    def test_send_large_json_response(self, wifi_with_send):
+        """Test sending a typical large JSON response (like /schedules)"""
+        # Simulate a schedules response with multiple entries
+        import json
+        schedules = {
+            "date": "2026-03-19",
+            "schedules": [
+                {"index": i, "hour": i % 24, "minute": 0, "enabled": True,
+                 "command": {"type": "status"},
+                 "executed": {"time": f"{i:02d}:00", "success": True,
+                              "output": {"T_vmc": "21.5", "T_hp": "45.0"}}}
+                for i in range(20)  # 20 schedules to make it large
+            ]
+        }
+        data = json.dumps(schedules)
+        # This should be > 2KB
+        assert len(data) > 2000
+
+        result = wifi_with_send.send(0, data)
+        assert result is True
+
+        # Verify chunking happened
+        cipsend_cmds = [cmd for cmd in wifi_with_send.uart.tx_buffer
+                        if b"AT+CIPSEND" in cmd]
+        assert len(cipsend_cmds) >= 2  # Should need multiple chunks

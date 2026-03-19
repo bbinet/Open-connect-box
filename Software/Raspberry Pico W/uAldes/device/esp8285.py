@@ -188,24 +188,46 @@ class ESP8285:
     def send(self, link_id, data):
         if isinstance(data, str):
             data = data.encode('utf-8')
-        length = len(data)
-        cmd = f"AT+CIPSEND={link_id},{length}"
-        resp = self._send_cmd(cmd, timeout=1000, wait_for=">")
-        if ">" not in resp:
-            return False
-        self.uart.write(data)
-        start = time.ticks_ms()
-        response = b""
-        while time.ticks_diff(time.ticks_ms(), start) < 5000:
-            if self.uart.any():
-                response += self.uart.read()
-                resp_str = response.decode('utf-8', 'ignore')
-                if "SEND OK" in resp_str:
-                    return True
-                if "SEND FAIL" in resp_str or "ERROR" in resp_str:
-                    return False
-            time.sleep_ms(10)
-        return False
+
+        # ESP8285 has a limit on data size per send (typically 2048 bytes)
+        # Split large data into chunks
+        CHUNK_SIZE = 1024
+        offset = 0
+        total = len(data)
+
+        while offset < total:
+            chunk = data[offset:offset + CHUNK_SIZE]
+            chunk_len = len(chunk)
+
+            cmd = f"AT+CIPSEND={link_id},{chunk_len}"
+            resp = self._send_cmd(cmd, timeout=1000, wait_for=">")
+            if ">" not in resp:
+                return False
+
+            self.uart.write(chunk)
+            start = time.ticks_ms()
+            response = b""
+            success = False
+            while time.ticks_diff(time.ticks_ms(), start) < 5000:
+                if self.uart.any():
+                    response += self.uart.read()
+                    resp_str = response.decode('utf-8', 'ignore')
+                    if "SEND OK" in resp_str:
+                        success = True
+                        break
+                    if "SEND FAIL" in resp_str or "ERROR" in resp_str:
+                        return False
+                time.sleep_ms(10)
+
+            if not success:
+                return False
+
+            offset += chunk_len
+            # Small delay between chunks to let ESP8285 process
+            if offset < total:
+                time.sleep_ms(50)
+
+        return True
 
     def receive(self, timeout=5000):
         start = time.ticks_ms()
