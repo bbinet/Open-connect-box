@@ -12,8 +12,8 @@ SERVICES = {
 
 # WiFi Configuration
 WIFI_NETWORKS = {
-    "ssid": "YOUR_WIFI_SSID",
-    "password": "YOUR_WIFI_PASSWORD",
+    "ssid": "nonoclem",
+    "password": "46yker6qsy83wham3yrc",
     "gateway": "192.168.1.1"
 }
 
@@ -42,7 +42,7 @@ UALDES_OPTIONS = {
 # Schedules are stored in schedules.json and managed via HTTP API or CLI
 SCHEDULER_CONFIG = {
     "enabled": True,
-    "timezone_offset": 1,  # UTC+1 for France (winter), set to 2 for summer time (CEST)
+    "timezone": "Europe/Paris",  # Timezone name (DST handled automatically)
     "ntp_server": "pool.ntp.org",
 }
 

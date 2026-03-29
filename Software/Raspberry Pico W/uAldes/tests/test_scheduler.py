@@ -477,3 +477,128 @@ class TestLoadSchedules:
 
         loaded = scheduler.load_schedules()
         assert loaded == []
+
+
+class TestDST:
+    """Tests for DST (Daylight Saving Time) functions"""
+
+    def test_get_eu_dst_offset_winter(self):
+        """Test DST offset in winter months (Jan, Feb, Nov, Dec)"""
+        import scheduler
+
+        # January - winter time
+        assert scheduler.get_eu_dst_offset(2026, 1, 15) == 0
+        # February - winter time
+        assert scheduler.get_eu_dst_offset(2026, 2, 15) == 0
+        # November - winter time
+        assert scheduler.get_eu_dst_offset(2026, 11, 15) == 0
+        # December - winter time
+        assert scheduler.get_eu_dst_offset(2026, 12, 15) == 0
+
+    def test_get_eu_dst_offset_summer(self):
+        """Test DST offset in summer months (Apr-Sep)"""
+        import scheduler
+
+        # April to September - always summer time
+        for month in range(4, 10):
+            assert scheduler.get_eu_dst_offset(2026, month, 15) == 1, f"Failed for month {month}"
+
+    def test_get_eu_dst_offset_march_transition(self):
+        """Test DST transition in March (last Sunday)"""
+        import scheduler
+
+        # 2026: March 29 is last Sunday
+        # Before last Sunday - winter
+        assert scheduler.get_eu_dst_offset(2026, 3, 28) == 0
+        # On last Sunday - summer
+        assert scheduler.get_eu_dst_offset(2026, 3, 29) == 1
+        # After last Sunday - summer
+        assert scheduler.get_eu_dst_offset(2026, 3, 30) == 1
+        assert scheduler.get_eu_dst_offset(2026, 3, 31) == 1
+
+    def test_get_eu_dst_offset_october_transition(self):
+        """Test DST transition in October (last Sunday)"""
+        import scheduler
+
+        # 2026: October 25 is last Sunday
+        # Before last Sunday - summer
+        assert scheduler.get_eu_dst_offset(2026, 10, 24) == 1
+        # On last Sunday - winter
+        assert scheduler.get_eu_dst_offset(2026, 10, 25) == 0
+        # After last Sunday - winter
+        assert scheduler.get_eu_dst_offset(2026, 10, 26) == 0
+        assert scheduler.get_eu_dst_offset(2026, 10, 31) == 0
+
+    def test_get_eu_dst_offset_various_years(self):
+        """Test DST for various years to verify formula"""
+        import scheduler
+
+        # Test data: (year, march_last_sunday, october_last_sunday)
+        test_years = [
+            (2024, 31, 27),
+            (2025, 30, 26),
+            (2026, 29, 25),
+            (2027, 28, 31),
+            (2028, 26, 29),
+        ]
+
+        for year, march_sun, oct_sun in test_years:
+            # Day before March transition - winter
+            assert scheduler.get_eu_dst_offset(year, 3, march_sun - 1) == 0, f"Failed {year} March {march_sun - 1}"
+            # March transition day - summer
+            assert scheduler.get_eu_dst_offset(year, 3, march_sun) == 1, f"Failed {year} March {march_sun}"
+            # Day before October transition - summer
+            assert scheduler.get_eu_dst_offset(year, 10, oct_sun - 1) == 1, f"Failed {year} Oct {oct_sun - 1}"
+            # October transition day - winter
+            assert scheduler.get_eu_dst_offset(year, 10, oct_sun) == 0, f"Failed {year} Oct {oct_sun}"
+
+    def test_get_timezone_offset_paris(self):
+        """Test timezone offset for Europe/Paris"""
+        import scheduler
+
+        # Winter: UTC+1
+        assert scheduler.get_timezone_offset("Europe/Paris", 2026, 1, 15) == 1
+        # Summer: UTC+2
+        assert scheduler.get_timezone_offset("Europe/Paris", 2026, 7, 15) == 2
+
+    def test_get_timezone_offset_london(self):
+        """Test timezone offset for Europe/London"""
+        import scheduler
+
+        # Winter: UTC+0
+        assert scheduler.get_timezone_offset("Europe/London", 2026, 1, 15) == 0
+        # Summer: UTC+1
+        assert scheduler.get_timezone_offset("Europe/London", 2026, 7, 15) == 1
+
+    def test_get_timezone_offset_helsinki(self):
+        """Test timezone offset for Europe/Helsinki (EET/EEST)"""
+        import scheduler
+
+        # Winter: UTC+2
+        assert scheduler.get_timezone_offset("Europe/Helsinki", 2026, 1, 15) == 2
+        # Summer: UTC+3
+        assert scheduler.get_timezone_offset("Europe/Helsinki", 2026, 7, 15) == 3
+
+    def test_get_timezone_offset_utc(self):
+        """Test timezone offset for UTC (no DST)"""
+        import scheduler
+
+        # UTC has no DST
+        assert scheduler.get_timezone_offset("UTC", 2026, 1, 15) == 0
+        assert scheduler.get_timezone_offset("UTC", 2026, 7, 15) == 0
+
+    def test_get_timezone_offset_unknown(self):
+        """Test timezone offset for unknown timezone"""
+        import scheduler
+
+        # Unknown timezone returns 0
+        assert scheduler.get_timezone_offset("Unknown/City", 2026, 7, 15) == 0
+
+    def test_get_timezone_offset_integer_fallback(self):
+        """Test timezone offset with integer string (fallback)"""
+        import scheduler
+
+        # Integer string as fallback
+        assert scheduler.get_timezone_offset("1", 2026, 7, 15) == 1
+        assert scheduler.get_timezone_offset("2", 2026, 7, 15) == 2
+        assert scheduler.get_timezone_offset("-5", 2026, 7, 15) == -5

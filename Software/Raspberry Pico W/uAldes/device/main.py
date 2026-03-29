@@ -271,7 +271,7 @@ if SCHEDULER_CONFIG.get("enabled", False):
     scheduler = Scheduler(
         wifi=wifi,
         uart=uart,
-        timezone_offset=SCHEDULER_CONFIG.get("timezone_offset", 1),
+        timezone=SCHEDULER_CONFIG.get("timezone", "Europe/Paris"),
         ntp_server=SCHEDULER_CONFIG.get("ntp_server", "pool.ntp.org"),
         status_callback=get_last_status
     )
