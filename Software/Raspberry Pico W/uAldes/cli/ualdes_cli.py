@@ -428,6 +428,24 @@ def format_help_api(data):
     return "\n".join(lines)
 
 
+def format_mode(data):
+    """Format mode data"""
+    W = 37
+    lines = []
+    lines.append("+" + "-" * W + "+")
+    lines.append(f"| {'CURRENT MODE':^{W-2}} |")
+    lines.append("+" + "-" * W + "+")
+    mode = data.get("mode", "unknown").upper()
+    lines.append(f"| Mode: {mode:<{W-9}} |")
+    if data.get("remaining_days"):
+        remaining = data["remaining_days"]
+        lines.append(f"| Remaining: {remaining} days{' '*(W-17-len(str(remaining)))} |")
+    if data.get("expired"):
+        lines.append(f"| {'(mode expired)':^{W-2}} |")
+    lines.append("+" + "-" * W + "+")
+    return "\n".join(lines)
+
+
 def format_response(data):
     """Format command response for human-readable output"""
     if not data:
@@ -435,6 +453,10 @@ def format_response(data):
 
     if "error" in data:
         return f"Error: {data['error']}"
+
+    # Mode endpoint
+    if "mode" in data and len(data) <= 5 and "mode" in data:
+        return format_mode(data)
 
     # Special formatting for info endpoint
     if "uptime" in data and "version" in data and "ip" in data:
@@ -529,6 +551,10 @@ DEFAULT_API = {
         "/info": {
             "description": "Get device info (version, uptime, IP)",
             "example": "curl http://{ip}/info"
+        },
+        "/mode": {
+            "description": "Get current mode and remaining duration",
+            "example": "curl http://{ip}/mode"
         },
         "/schedules": {
             "description": "Manage scheduled commands",

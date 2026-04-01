@@ -79,7 +79,7 @@ FAKE_STATUS = {
 class HttpServer:
     """Simple HTTP server for uAldes commands"""
 
-    VERSION = "1.1"
+    VERSION = "1.2"
 
     def __init__(self, wifi, uart, port=80, stats_callback=None, scheduler=None, status_callback=None, repl_enabled=False, log_callback=None):
         self.wifi = wifi
@@ -95,6 +95,11 @@ class HttpServer:
         self.log_callback = log_callback
         self.tcp_repl = None
         self.repl_connections = set()  # Track active REPL connections
+
+        # Mode tracking
+        self.current_mode = "auto"  # auto, boost, confort, vacances
+        self.mode_duration = None   # Duration in days for confort/vacances
+        self.mode_set_time = None   # Timestamp when mode was set
 
         if repl_enabled:
             from tcp_repl import TcpRepl
@@ -125,6 +130,34 @@ class HttpServer:
             age = current_time - status_time if status_time > 0 else -1
             return status, status_time, age
         return {}, 0, -1
+
+    def _set_mode(self, mode, duration=None):
+        """Track mode change"""
+        import utime
+        self.current_mode = mode
+        self.mode_duration = duration
+        self.mode_set_time = utime.time()
+
+    def _get_mode_info(self):
+        """Get current mode with remaining duration"""
+        import utime
+        result = {"mode": self.current_mode}
+        if self.mode_set_time:
+            elapsed = utime.time() - self.mode_set_time
+            result["set_ago"] = elapsed
+            if self.mode_duration:
+                # Duration is in days, convert to seconds
+                total_seconds = self.mode_duration * 86400
+                remaining = total_seconds - elapsed
+                if remaining > 0:
+                    result["duration"] = self.mode_duration
+                    result["remaining_seconds"] = int(remaining)
+                    result["remaining_days"] = round(remaining / 86400, 1)
+                else:
+                    # Mode expired, assume auto
+                    result["mode"] = "auto"
+                    result["expired"] = True
+        return result
 
     def handle_request(self, link_id, data):
         """Handle incoming HTTP request"""
@@ -175,6 +208,7 @@ class HttpServer:
                 frame = ualdes.frame_encode(cmd)
                 if frame:
                     self.uart.write(bytearray(frame))
+                    self._set_mode("auto")
                     response = json_response({"status": "ok", "command": "auto"})
                 else:
                     response = json_response({"error": "Failed to encode command"}, 400)
@@ -209,6 +243,7 @@ class HttpServer:
                 frame = ualdes.frame_encode(cmd)
                 if frame:
                     self.uart.write(bytearray(frame))
+                    self._set_mode("boost")
                     response = json_response({"status": "ok", "command": "boost"})
                 else:
                     response = json_response({"error": "Failed to encode command"}, 400)
@@ -222,6 +257,7 @@ class HttpServer:
                 frame = ualdes.frame_encode(cmd)
                 if frame:
                     self.uart.write(bytearray(frame))
+                    self._set_mode("confort", duration)
                     response = json_response({"status": "ok", "command": "confort", "duration": duration})
                 else:
                     response = json_response({"error": "Failed to encode command"}, 400)
@@ -235,6 +271,7 @@ class HttpServer:
                 frame = ualdes.frame_encode(cmd)
                 if frame:
                     self.uart.write(bytearray(frame))
+                    self._set_mode("vacances", duration)
                     response = json_response({"status": "ok", "command": "vacances", "duration": duration})
                 else:
                     response = json_response({"error": "Failed to encode command"}, 400)
@@ -286,6 +323,10 @@ class HttpServer:
             # Simple endpoint for device discovery
             response = json_response({"ualdes": True})
 
+        elif path == "/mode":
+            # Get current mode with remaining duration
+            response = json_response(self._get_mode_info())
+
         elif path == "/" or path == "/help":
             # Build endpoints dict incrementally to reduce memory pressure
             ep = {}
@@ -296,6 +337,7 @@ class HttpServer:
             ep["/vacances"] = {"description": "Set vacation mode", "params": {"duration": "days"}}
             ep["/temp"] = {"description": "Set temperature", "params": {"value": "celsius"}}
             ep["/info"] = {"description": "Get device info"}
+            ep["/mode"] = {"description": "Get current mode and remaining duration"}
             ep["/time"] = {"description": "Get device time"}
             ep["/log"] = {"description": "Get debug logs", "params": {"lines": "count"}}
             ep["/log_clear"] = {"description": "Clear debug logs"}
