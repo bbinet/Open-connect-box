@@ -290,6 +290,114 @@ def test_boost_with_min_temp(device_ip):
     return True
 
 
+def test_reboot_restore(device_ip):
+    """
+    Test that after reboot, the last scheduled command is restored.
+    """
+    print("\nTesting reboot restore functionality...")
+    print("-" * 50)
+
+    # 1. Save existing schedules
+    saved_schedules = save_schedules(device_ip)
+    print(f"Saved {len(saved_schedules)} existing schedules")
+
+    try:
+        # 2. Clear schedules and add a test schedule
+        http_get(device_ip, "/schedules?action=clear")
+        time.sleep(0.3)
+
+        # Get current time from device
+        body, _ = http_get(device_ip, "/time")
+        if not body:
+            print("[FAIL] Cannot get device time")
+            return False
+
+        try:
+            time_data = json.loads(body)
+            current_hour = time_data.get("hour", 12)
+            current_minute = time_data.get("minute", 0)
+        except json.JSONDecodeError:
+            print("[FAIL] Invalid time response")
+            return False
+
+        # Add a schedule 1 hour before current time (should be "last executed")
+        test_hour = (current_hour - 1) % 24
+        path = f"/schedules?action=add&hour={test_hour}&minute=0&type=confort&duration=1"
+        resp, _ = http_get(device_ip, path)
+        if not resp:
+            print("[FAIL] Cannot add test schedule")
+            return False
+
+        print(f"  Added test schedule: confort at {test_hour:02d}:00")
+        time.sleep(0.3)
+
+        # 3. Reboot the device
+        print("  Rebooting device...")
+        http_get(device_ip, "/reboot")
+        print("  Waiting for device to restart...")
+        time.sleep(15)  # Wait for reboot and NTP sync
+
+        # 4. Check that the schedule was executed with reboot flag
+        # Retry a few times in case device is slow to respond
+        body = None
+        for attempt in range(5):
+            body, _ = http_get(device_ip, "/schedules")
+            if body:
+                break
+            print(f"  Waiting for device... (attempt {attempt + 1}/5)")
+            time.sleep(3)
+
+        if not body:
+            print("[FAIL] Cannot get schedules after reboot")
+            return False
+
+        try:
+            data = json.loads(body)
+            schedules = data.get("schedules", [])
+            if not schedules:
+                print("[FAIL] No schedules found after reboot")
+                return False
+
+            schedule = schedules[0]
+            executed = schedule.get("executed")
+
+            if not executed:
+                print("[FAIL] Schedule was not executed on reboot")
+                return False
+
+            if not executed.get("reboot"):
+                print("[FAIL] Execution missing 'reboot' flag")
+                return False
+
+            if not executed.get("success"):
+                print(f"[FAIL] Execution failed: {executed.get('error')}")
+                return False
+
+            print(f"[PASS] Schedule restored on reboot: {executed.get('command', {}).get('type')}")
+            print(f"  Executed at: {executed.get('time')}")
+            print(f"  Reboot flag: {executed.get('reboot')}")
+
+            # Check mode is now confort
+            time.sleep(0.5)
+            mode_info = get_current_mode(device_ip)
+            if mode_info and mode_info.get("mode") == "confort":
+                print(f"[PASS] Mode correctly set to confort")
+            else:
+                print(f"[WARN] Mode is {mode_info.get('mode') if mode_info else 'unknown'}, expected confort")
+
+            return True
+
+        except json.JSONDecodeError as e:
+            print(f"[FAIL] Invalid JSON: {e}")
+            return False
+
+    finally:
+        # 5. Restore original schedules
+        print(f"\nRestoring {len(saved_schedules)} original schedules...")
+        restore_schedules(device_ip, saved_schedules)
+        print("  Schedules restored")
+
+
 def run_tests(device_ip):
     """Run all HTTP integration tests"""
     print(f"Testing device at {device_ip}")
@@ -353,6 +461,12 @@ def run_tests(device_ip):
         print("\n4. Testing boost with min_temp condition...")
         if not test_boost_with_min_temp(device_ip):
             print("[FAIL] Boost min_temp test failed")
+            return False
+
+        # Test 5: Reboot restore (restores last scheduled command)
+        print("\n5. Testing reboot restore...")
+        if not test_reboot_restore(device_ip):
+            print("[FAIL] Reboot restore test failed")
             return False
 
         print("\n" + "=" * 50)
