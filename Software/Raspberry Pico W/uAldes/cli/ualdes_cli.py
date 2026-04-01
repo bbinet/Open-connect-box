@@ -377,6 +377,8 @@ def format_schedules(data):
         if executed:
             exec_time = executed.get("time", "?")
             exec_status = "OK" if executed.get("success") else "FAIL"
+            if executed.get("reboot"):
+                exec_status += " (reboot)"
             exec_str = f" [{exec_time}: {exec_status}]"
         text = f"{idx}: [{enabled}] {hour:02d}:{minute:02d} -> {cmd_type}{param_str}{exec_str}"
         lines.append(f"| {text:<{W-2}} |")

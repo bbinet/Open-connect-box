@@ -275,10 +275,78 @@ class Scheduler:
             time_tuple = self.wifi.get_sntp_time()
             if time_tuple:
                 self.time_synced = True
+                year, month, day = time_tuple[0], time_tuple[1], time_tuple[2]
+                self.current_date = f"{year}-{month:02d}-{day:02d}"
                 print(f"Scheduler: Time synced - {time_tuple[3]:02d}:{time_tuple[4]:02d} (UTC+{self._current_offset})")
+
+            # Restore last scheduled command on boot
+            self._restore_on_boot()
             return True
         print("Scheduler: Failed to configure SNTP")
         return False
+
+    def _restore_on_boot(self):
+        """Find and execute the most recent scheduled command on boot"""
+        import ualdes
+
+        time_tuple = self.get_current_time()
+        if not time_tuple or time_tuple[0] < 2020:
+            print("Scheduler: Cannot restore - time not synced, setting auto")
+            self._execute_auto_on_boot()
+            return
+
+        current_minutes = time_tuple[3] * 60 + time_tuple[4]
+        schedules = get_schedules()
+
+        if not schedules:
+            print("Scheduler: No schedules, setting auto mode")
+            self._execute_auto_on_boot()
+            return
+
+        # Find the most recent enabled schedule before current time
+        best_schedule = None
+        best_index = -1
+        best_minutes = -1
+
+        for i, schedule in enumerate(schedules):
+            if not schedule.get("enabled", True):
+                continue
+            sched_minutes = schedule.get("hour", 0) * 60 + schedule.get("minute", 0)
+
+            # Schedule before or at current time (today)
+            if sched_minutes <= current_minutes:
+                if sched_minutes > best_minutes:
+                    best_minutes = sched_minutes
+                    best_schedule = schedule
+                    best_index = i
+
+        # If no schedule found before current time, wrap around to yesterday's last
+        if best_schedule is None:
+            for i, schedule in enumerate(schedules):
+                if not schedule.get("enabled", True):
+                    continue
+                sched_minutes = schedule.get("hour", 0) * 60 + schedule.get("minute", 0)
+                if sched_minutes > best_minutes:
+                    best_minutes = sched_minutes
+                    best_schedule = schedule
+                    best_index = i
+
+        if best_schedule:
+            cmd_type = best_schedule.get("command", {}).get("type", "auto")
+            print(f"Scheduler: Restoring {cmd_type} from {best_schedule.get('hour'):02d}:{best_schedule.get('minute'):02d}")
+            self._execute_schedule(best_index, best_schedule, reboot=True)
+        else:
+            print("Scheduler: No enabled schedules, setting auto mode")
+            self._execute_auto_on_boot()
+
+    def _execute_auto_on_boot(self):
+        """Execute auto mode on boot"""
+        import ualdes
+        cmd_json = json.dumps({"type": "auto"})
+        frame = ualdes.frame_encode(cmd_json)
+        if frame:
+            self.uart.write(bytearray(frame))
+            print("Scheduler: Auto mode set on boot")
 
     def get_current_time(self):
         """Get current time as tuple (year, month, day, hour, minute, second)"""
@@ -291,7 +359,7 @@ class Scheduler:
             "executions": self.today_executions
         }
 
-    def _record_execution(self, index, schedule, success, output=None, error=None):
+    def _record_execution(self, index, schedule, success, output=None, error=None, reboot=False):
         """Record an execution attempt"""
         time_tuple = self.get_current_time()
         time_str = f"{time_tuple[3]:02d}:{time_tuple[4]:02d}:{time_tuple[5]:02d}" if time_tuple else "unknown"
@@ -305,6 +373,8 @@ class Scheduler:
         }
         if error:
             record["error"] = str(error)
+        if reboot:
+            record["reboot"] = True
 
         self.today_executions.append(record)
 
@@ -314,6 +384,92 @@ class Scheduler:
             if record["index"] == index and record["success"]:
                 return True
         return False
+
+    def _execute_schedule(self, index, schedule, reboot=False):
+        """Execute a scheduled command and record the result.
+
+        Args:
+            index: Schedule index
+            schedule: Schedule dict with command info
+            reboot: True if this execution is due to a reboot
+
+        Returns:
+            True if command was executed or skipped (success), False on error
+        """
+        import ualdes
+
+        command = schedule.get("command", {})
+        cmd_type = command.get("type", "")
+        cmd_params = command.get("params", {})
+        context = "on boot" if reboot else ""
+
+        try:
+            if cmd_type == "status":
+                # Read-only: get current status (skip on reboot)
+                if reboot:
+                    print(f"Scheduler: Skipping status {context} (read-only)")
+                    return True
+                if self.status_callback:
+                    output = self.status_callback()
+                    self._record_execution(index, schedule, True, output, reboot=reboot)
+                    print(f"Scheduler: Status recorded")
+                else:
+                    self._record_execution(index, schedule, False, None, "No status callback", reboot=reboot)
+                return True
+
+            elif cmd_type == "boost":
+                # Boost with optional min_temp condition
+                min_temp = cmd_params.get("min_temp")
+
+                # Check temperature condition if min_temp is specified
+                if min_temp is not None and self.status_callback:
+                    try:
+                        status = self.status_callback()
+                        t_haut = status.get("T_haut")
+                        if t_haut is not None and float(t_haut) >= float(min_temp):
+                            output = {
+                                "skipped": True,
+                                "reason": f"T_haut ({t_haut}C) >= min_temp ({min_temp}C)",
+                                "T_haut": float(t_haut),
+                                "min_temp": float(min_temp)
+                            }
+                            self._record_execution(index, schedule, True, output, reboot=reboot)
+                            print(f"Scheduler: Boost skipped {context} - T_haut ({t_haut}C) >= {min_temp}C")
+                            return True
+                    except (ValueError, TypeError):
+                        pass
+
+                # Execute boost
+                cmd_json = json.dumps({"type": "boost"})
+                frame = ualdes.frame_encode(cmd_json)
+                if frame:
+                    self.uart.write(bytearray(frame))
+                    output = self.status_callback() if self.status_callback else None
+                    self._record_execution(index, schedule, True, output, reboot=reboot)
+                    print(f"Scheduler: Executed boost {context}")
+                    return True
+                else:
+                    self._record_execution(index, schedule, False, None, "Failed to encode", reboot=reboot)
+                    return False
+
+            else:
+                # Other write commands (auto, confort, vacances, temp)
+                cmd_json = json.dumps(command)
+                frame = ualdes.frame_encode(cmd_json)
+                if frame:
+                    self.uart.write(bytearray(frame))
+                    output = self.status_callback() if self.status_callback else None
+                    self._record_execution(index, schedule, True, output, reboot=reboot)
+                    print(f"Scheduler: Executed {cmd_type} {context}")
+                    return True
+                else:
+                    self._record_execution(index, schedule, False, None, "Failed to encode", reboot=reboot)
+                    return False
+
+        except Exception as e:
+            print(f"Scheduler: Error {context} - {e}")
+            self._record_execution(index, schedule, False, None, e, reboot=reboot)
+            return False
 
     def check(self):
         """Check and execute due schedules. Call periodically from main loop."""
@@ -361,68 +517,10 @@ class Scheduler:
 
             sched_hour = schedule.get("hour", -1)
             sched_minute = schedule.get("minute", -1)
-            command = schedule.get("command", {})
-            cmd_type = command.get("type", "")
 
             if self._already_executed_today(i):
                 continue
 
             if hour == sched_hour and minute == sched_minute:
                 print(f"Scheduler: Running schedule {i} at {hour:02d}:{minute:02d}")
-                try:
-                    if cmd_type == "status":
-                        # Read-only: get current status
-                        if self.status_callback:
-                            output = self.status_callback()
-                            self._record_execution(i, schedule, True, output)
-                            print(f"Scheduler: Status recorded")
-                        else:
-                            self._record_execution(i, schedule, False, None, "No status callback")
-                    elif cmd_type == "boost":
-                        # Boost with optional min_temp condition
-                        cmd_params = command.get("params", {})
-                        min_temp = cmd_params.get("min_temp")
-
-                        # Check temperature condition if min_temp is specified
-                        if min_temp is not None and self.status_callback:
-                            try:
-                                status = self.status_callback()
-                                t_haut = status.get("T_haut")
-                                if t_haut is not None and float(t_haut) >= float(min_temp):
-                                    output = {
-                                        "skipped": True,
-                                        "reason": f"T_haut ({t_haut}C) >= min_temp ({min_temp}C)",
-                                        "T_haut": float(t_haut),
-                                        "min_temp": float(min_temp)
-                                    }
-                                    self._record_execution(i, schedule, True, output)
-                                    print(f"Scheduler: Boost skipped - T_haut ({t_haut}C) >= {min_temp}C")
-                                    continue
-                            except (ValueError, TypeError):
-                                pass
-
-                        # Execute boost
-                        cmd_json = json.dumps({"type": "boost"})
-                        frame = ualdes.frame_encode(cmd_json)
-                        if frame:
-                            self.uart.write(bytearray(frame))
-                            output = self.status_callback() if self.status_callback else None
-                            self._record_execution(i, schedule, True, output)
-                            print(f"Scheduler: Executed boost")
-                        else:
-                            self._record_execution(i, schedule, False, None, "Failed to encode")
-                    else:
-                        # Other write commands
-                        cmd_json = json.dumps(command)
-                        frame = ualdes.frame_encode(cmd_json)
-                        if frame:
-                            self.uart.write(bytearray(frame))
-                            # Get status after command
-                            output = self.status_callback() if self.status_callback else None
-                            self._record_execution(i, schedule, True, output)
-                            print(f"Scheduler: Executed {cmd_type}")
-                        else:
-                            self._record_execution(i, schedule, False, None, "Failed to encode")
-                except Exception as e:
-                    print(f"Scheduler: Error - {e}")
-                    self._record_execution(i, schedule, False, None, e)
+                self._execute_schedule(i, schedule)
