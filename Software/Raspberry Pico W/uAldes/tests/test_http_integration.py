@@ -48,32 +48,121 @@ def http_get(host, path, timeout=10):
     return response, ""
 
 
+def get_current_mode(device_ip):
+    """Get current water heater mode with duration info"""
+    body, _ = http_get(device_ip, "/mode")
+    if not body:
+        return None
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        return None
+
+
+def restore_mode(device_ip, mode_info):
+    """Restore water heater mode from saved info"""
+    if not mode_info:
+        return set_mode(device_ip, "auto")
+
+    mode = mode_info.get("mode", "auto")
+    remaining_days = mode_info.get("remaining_days")
+
+    if mode in ("confort", "vacances") and remaining_days and remaining_days > 0:
+        # Restore timed mode with remaining duration
+        duration = max(1, int(remaining_days + 0.5))  # Round to nearest day, min 1
+        return set_mode(device_ip, mode, duration)
+    else:
+        return set_mode(device_ip, mode)
+
+
+def set_mode(device_ip, mode, duration=None):
+    """Set water heater mode"""
+    if mode == "auto":
+        path = "/auto"
+    elif mode == "boost":
+        path = "/boost"
+    elif mode == "confort":
+        path = f"/confort?duration={duration or 2}"
+    elif mode == "vacances":
+        path = f"/vacances?duration={duration or 10}"
+    else:
+        path = "/auto"
+
+    body, _ = http_get(device_ip, path)
+    if body:
+        try:
+            result = json.loads(body)
+            return result.get("status") == "ok"
+        except json.JSONDecodeError:
+            pass
+    return False
+
+
+def save_schedules(device_ip):
+    """Save all existing schedules and return them"""
+    body, _ = http_get(device_ip, "/schedules")
+    if not body:
+        return []
+    try:
+        data = json.loads(body)
+        schedules = data.get("schedules", [])
+        # Remove runtime fields (index, executed) - keep only config
+        saved = []
+        for s in schedules:
+            saved.append({
+                "hour": s.get("hour"),
+                "minute": s.get("minute"),
+                "command": s.get("command", {}),
+                "enabled": s.get("enabled", True)
+            })
+        return saved
+    except json.JSONDecodeError:
+        return []
+
+
+def restore_schedules(device_ip, schedules):
+    """Restore schedules from saved list"""
+    # Clear all first
+    http_get(device_ip, "/schedules?action=clear")
+    time.sleep(0.3)
+
+    # Re-add each schedule
+    for s in schedules:
+        hour = s.get("hour", 0)
+        minute = s.get("minute", 0)
+        cmd = s.get("command", {})
+        cmd_type = cmd.get("type", "status")
+        params = cmd.get("params", {})
+        enabled = "1" if s.get("enabled", True) else "0"
+
+        path = f"/schedules?action=add&hour={hour}&minute={minute}&type={cmd_type}&enabled={enabled}"
+        for k, v in params.items():
+            path += f"&{k}={v}"
+
+        http_get(device_ip, path)
+        time.sleep(0.2)
+
+
 def test_large_http_response(device_ip, target_size=2000):
     """
     Test that HTTP responses larger than ESP8285 single-send limit work.
 
-    Creates temporary schedules to generate a response > target_size bytes,
-    then cleans up.
+    Saves existing schedules, creates test schedules, runs test, then restores.
     """
     print(f"\nTesting large HTTP response (target > {target_size} bytes)")
     print("-" * 50)
 
-    # 1. Get initial schedules and their count
-    body, _ = http_get(device_ip, "/schedules")
-    if not body:
-        print("[FAIL] Cannot get initial schedules")
-        return False
-
-    initial_data = json.loads(body)
-    initial_count = len(initial_data.get("schedules", []))
-    initial_size = len(body)
-    print(f"Initial: {initial_count} schedules, {initial_size} bytes")
-
-    # 2. Add schedules until response exceeds target size
-    added_indices = []
-    current_size = initial_size
+    # 1. Save existing schedules
+    saved_schedules = save_schedules(device_ip)
+    print(f"Saved {len(saved_schedules)} existing schedules")
 
     try:
+        # 2. Clear all schedules for clean test
+        http_get(device_ip, "/schedules?action=clear")
+        time.sleep(0.3)
+
+        # 3. Add schedules until response exceeds target size
+        current_size = 0
         hour = 0
         while current_size < target_size and hour < 24:
             # Add a schedule
@@ -82,7 +171,6 @@ def test_large_http_response(device_ip, target_size=2000):
             if resp:
                 result = json.loads(resp)
                 if result.get("status") == "ok":
-                    added_indices.append(result.get("index"))
                     print(f"  Added schedule at {hour:02d}:30 (index {result.get('index')})")
 
             time.sleep(0.3)  # Small delay between requests
@@ -95,7 +183,7 @@ def test_large_http_response(device_ip, target_size=2000):
 
             hour += 1
 
-        # 3. Final test - can we get the large response?
+        # 4. Final test - can we get the large response?
         print(f"\nFinal test with {current_size} bytes response...")
         body, headers = http_get(device_ip, "/schedules")
 
@@ -124,19 +212,10 @@ def test_large_http_response(device_ip, target_size=2000):
             return False
 
     finally:
-        # 4. Cleanup - remove added schedules (in reverse order since indices shift)
-        print("\nCleaning up added schedules...")
-        # Re-fetch to get current indices
-        body, _ = http_get(device_ip, "/schedules")
-        if body:
-            data = json.loads(body)
-            current_count = len(data.get("schedules", []))
-            # Remove from the end to avoid index shifting issues
-            for i in range(current_count - 1, initial_count - 1, -1):
-                path = f"/schedules?action=remove&index={i}"
-                http_get(device_ip, path)
-                time.sleep(0.2)
-            print(f"  Removed {current_count - initial_count} schedules")
+        # 5. Restore original schedules
+        print(f"\nRestoring {len(saved_schedules)} original schedules...")
+        restore_schedules(device_ip, saved_schedules)
+        print("  Schedules restored")
 
 
 def test_boost_with_min_temp(device_ip):
@@ -216,56 +295,79 @@ def run_tests(device_ip):
     print(f"Testing device at {device_ip}")
     print("=" * 50)
 
-    # Test 1: Basic connectivity
-    print("\n1. Testing basic connectivity...")
-    body, _ = http_get(device_ip, "/ualdes")
-    if not body:
-        print("[FAIL] Cannot connect to device")
-        return False
+    # Save initial state
+    initial_mode = get_current_mode(device_ip)
+    if initial_mode:
+        mode_str = initial_mode.get("mode", "unknown")
+        remaining = initial_mode.get("remaining_days")
+        if remaining:
+            print(f"Initial mode: {mode_str} ({remaining} days remaining)")
+        else:
+            print(f"Initial mode: {mode_str}")
+    else:
+        print("Initial mode: unknown (could not fetch)")
+
     try:
-        data = json.loads(body)
-        if data.get("ualdes"):
-            print("[PASS] Device responds correctly")
-        else:
-            print("[FAIL] Unexpected response")
+        # Test 1: Basic connectivity
+        print("\n1. Testing basic connectivity...")
+        body, _ = http_get(device_ip, "/ualdes")
+        if not body:
+            print("[FAIL] Cannot connect to device")
             return False
-    except:
-        print("[FAIL] Invalid JSON response")
-        return False
-
-    # Test 2: Various endpoint sizes
-    print("\n2. Testing various endpoints...")
-    endpoints = ["/ualdes", "/info", "/time", "/status", "/help", "/schedules"]
-
-    for endpoint in endpoints:
-        time.sleep(0.5)  # Small delay between requests to avoid overloading ESP8285
-        body, _ = http_get(device_ip, endpoint)
-        if body:
-            try:
-                json.loads(body)
-                print(f"  [PASS] {endpoint:15} {len(body):5} bytes")
-            except:
-                print(f"  [FAIL] {endpoint:15} invalid JSON")
+        try:
+            data = json.loads(body)
+            if data.get("ualdes"):
+                print("[PASS] Device responds correctly")
+            else:
+                print("[FAIL] Unexpected response")
                 return False
-        else:
-            print(f"  [FAIL] {endpoint:15} empty response")
+        except:
+            print("[FAIL] Invalid JSON response")
             return False
 
-    # Test 3: Large response test (the main test for chunked send fix)
-    print("\n3. Testing large HTTP response (chunked send fix)...")
-    if not test_large_http_response(device_ip, target_size=2000):
-        print("[FAIL] Large response test failed")
-        return False
+        # Test 2: Various endpoint sizes
+        print("\n2. Testing various endpoints...")
+        endpoints = ["/ualdes", "/info", "/time", "/status", "/help", "/schedules"]
 
-    # Test 4: Boost with min_temp condition
-    print("\n4. Testing boost with min_temp condition...")
-    if not test_boost_with_min_temp(device_ip):
-        print("[FAIL] Boost min_temp test failed")
-        return False
+        for endpoint in endpoints:
+            time.sleep(0.5)  # Small delay between requests to avoid overloading ESP8285
+            body, _ = http_get(device_ip, endpoint)
+            if body:
+                try:
+                    json.loads(body)
+                    print(f"  [PASS] {endpoint:15} {len(body):5} bytes")
+                except:
+                    print(f"  [FAIL] {endpoint:15} invalid JSON")
+                    return False
+            else:
+                print(f"  [FAIL] {endpoint:15} empty response")
+                return False
 
-    print("\n" + "=" * 50)
-    print("All tests passed!")
-    return True
+        # Test 3: Large response test (the main test for chunked send fix)
+        print("\n3. Testing large HTTP response (chunked send fix)...")
+        if not test_large_http_response(device_ip, target_size=2000):
+            print("[FAIL] Large response test failed")
+            return False
+
+        # Test 4: Boost with min_temp condition
+        print("\n4. Testing boost with min_temp condition...")
+        if not test_boost_with_min_temp(device_ip):
+            print("[FAIL] Boost min_temp test failed")
+            return False
+
+        print("\n" + "=" * 50)
+        print("All tests passed!")
+        return True
+
+    finally:
+        # Restore original mode
+        print("\nRestoring device mode...")
+        time.sleep(0.5)
+        if restore_mode(device_ip, initial_mode):
+            final_mode = get_current_mode(device_ip)
+            initial_name = initial_mode.get("mode") if initial_mode else "unknown"
+            final_name = final_mode.get("mode") if final_mode else "unknown"
+            print(f"  Mode restored: {initial_name} -> {final_name}")
 
 
 if __name__ == "__main__":
