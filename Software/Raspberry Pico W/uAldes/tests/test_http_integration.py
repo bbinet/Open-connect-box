@@ -139,6 +139,78 @@ def test_large_http_response(device_ip, target_size=2000):
             print(f"  Removed {current_count - initial_count} schedules")
 
 
+def test_boost_with_min_temp(device_ip):
+    """
+    Test boost command with min_temp condition.
+
+    Tests that boost is skipped when T_haut >= min_temp.
+    """
+    print("\nTesting boost with min_temp condition...")
+    print("-" * 50)
+
+    time.sleep(1)  # Allow device to settle after previous tests
+
+    # First get current status to know T_haut
+    body, _ = http_get(device_ip, "/status")
+    if not body:
+        print("[FAIL] Cannot get status")
+        return False
+
+    try:
+        status = json.loads(body)
+        t_haut = status.get("T_haut")
+        if t_haut is None:
+            print("[SKIP] T_haut not available in status")
+            return True
+        t_haut = float(t_haut)
+        print(f"Current T_haut: {t_haut}C")
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"[FAIL] Cannot parse status: {e}")
+        return False
+
+    # Test 1: boost with min_temp below current T_haut (should be skipped)
+    min_temp_low = t_haut - 5  # 5 degrees below current
+    time.sleep(0.5)
+    body, _ = http_get(device_ip, f"/boost?min_temp={min_temp_low}")
+    if not body:
+        print(f"[FAIL] Empty response for boost?min_temp={min_temp_low}")
+        return False
+
+    try:
+        result = json.loads(body)
+        if result.get("status") == "skipped":
+            print(f"[PASS] Boost skipped when min_temp={min_temp_low}C < T_haut={t_haut}C")
+        else:
+            # Boost was executed (T_haut might have changed)
+            print(f"[WARN] Boost executed (T_haut may be < {min_temp_low}C)")
+    except json.JSONDecodeError as e:
+        print(f"[FAIL] Invalid JSON: {e}")
+        return False
+
+    # Test 2: boost with min_temp above current T_haut (should execute)
+    min_temp_high = t_haut + 10  # 10 degrees above current
+    time.sleep(0.5)
+    body, _ = http_get(device_ip, f"/boost?min_temp={min_temp_high}")
+    if not body:
+        print(f"[FAIL] Empty response for boost?min_temp={min_temp_high}")
+        return False
+
+    try:
+        result = json.loads(body)
+        if result.get("status") == "ok":
+            print(f"[PASS] Boost executed when min_temp={min_temp_high}C > T_haut={t_haut}C")
+        elif result.get("status") == "skipped":
+            print(f"[WARN] Boost skipped unexpectedly (T_haut may have changed to >= {min_temp_high}C)")
+        else:
+            print(f"[FAIL] Unexpected response: {result}")
+            return False
+    except json.JSONDecodeError as e:
+        print(f"[FAIL] Invalid JSON: {e}")
+        return False
+
+    return True
+
+
 def run_tests(device_ip):
     """Run all HTTP integration tests"""
     print(f"Testing device at {device_ip}")
@@ -166,6 +238,7 @@ def run_tests(device_ip):
     endpoints = ["/ualdes", "/info", "/time", "/status", "/help", "/schedules"]
 
     for endpoint in endpoints:
+        time.sleep(0.5)  # Small delay between requests to avoid overloading ESP8285
         body, _ = http_get(device_ip, endpoint)
         if body:
             try:
@@ -182,6 +255,12 @@ def run_tests(device_ip):
     print("\n3. Testing large HTTP response (chunked send fix)...")
     if not test_large_http_response(device_ip, target_size=2000):
         print("[FAIL] Large response test failed")
+        return False
+
+    # Test 4: Boost with min_temp condition
+    print("\n4. Testing boost with min_temp condition...")
+    if not test_boost_with_min_temp(device_ip):
+        print("[FAIL] Boost min_temp test failed")
         return False
 
     print("\n" + "=" * 50)

@@ -180,6 +180,28 @@ class HttpServer:
                     response = json_response({"error": "Failed to encode command"}, 400)
 
         elif path == "/boost":
+            min_temp = params.get("min_temp")
+
+            # Check temperature condition if min_temp is specified
+            if min_temp is not None and not test_mode:
+                try:
+                    min_temp_val = float(min_temp)
+                    status, _ = self.status_callback() if self.status_callback else ({}, 0)
+                    t_haut = status.get("T_haut")
+                    if t_haut is not None:
+                        if float(t_haut) >= min_temp_val:
+                            response = json_response({
+                                "status": "skipped",
+                                "command": "boost",
+                                "reason": f"T_haut ({t_haut}C) >= min_temp ({min_temp_val}C)",
+                                "T_haut": float(t_haut),
+                                "min_temp": min_temp_val
+                            })
+                            self.wifi.send_response(link_id, response)
+                            return
+                except (ValueError, TypeError):
+                    pass
+
             if test_mode:
                 response = json_response({"status": "ok", "command": "boost", "test": True})
             else:
@@ -269,7 +291,7 @@ class HttpServer:
             ep = {}
             ep["/status"] = {"description": "Get sensor data"}
             ep["/auto"] = {"description": "Set auto mode"}
-            ep["/boost"] = {"description": "Set boost mode"}
+            ep["/boost"] = {"description": "Set boost mode", "params": {"min_temp": "only if T_haut < value"}}
             ep["/confort"] = {"description": "Set comfort mode", "params": {"duration": "days"}}
             ep["/vacances"] = {"description": "Set vacation mode", "params": {"duration": "days"}}
             ep["/temp"] = {"description": "Set temperature", "params": {"value": "celsius"}}
@@ -278,7 +300,7 @@ class HttpServer:
             ep["/log"] = {"description": "Get debug logs", "params": {"lines": "count"}}
             ep["/log_clear"] = {"description": "Clear debug logs"}
             ep["/reboot"] = {"description": "Reboot device"}
-            ep["/schedules"] = {"description": "Manage schedules", "params": {"action": "list|add|edit|remove|clear", "hour": "0-23", "minute": "0-59", "type": "cmd", "index": "idx"}}
+            ep["/schedules"] = {"description": "Manage schedules", "params": {"action": "list|add|edit|remove|clear", "hour": "0-23", "minute": "0-59", "type": "cmd", "index": "idx", "min_temp": "boost condition"}}
             response = json_response({"api": "uAldes HTTP API", "version": self.VERSION, "endpoints": ep})
 
         elif path == "/schedules":
@@ -306,10 +328,15 @@ class HttpServer:
                     minute = int(params.get("minute", 0))
                     cmd_type = params.get("type", "")
                     duration = params.get("duration")
-                    cmd_params = {"duration": int(duration)} if duration else None
+                    min_temp = params.get("min_temp")
+                    cmd_params = {}
+                    if duration:
+                        cmd_params["duration"] = int(duration)
+                    if min_temp:
+                        cmd_params["min_temp"] = float(min_temp)
                     enabled = params.get("enabled", "1") == "1"
 
-                    index = scheduler.add_schedule(hour, minute, cmd_type, cmd_params, enabled)
+                    index = scheduler.add_schedule(hour, minute, cmd_type, cmd_params if cmd_params else None, enabled)
                     if index >= 0:
                         response = json_response({"status": "ok", "index": index})
                     else:
@@ -324,7 +351,14 @@ class HttpServer:
                     minute = int(params["minute"]) if "minute" in params else None
                     cmd_type = params.get("type")
                     duration = params.get("duration")
-                    cmd_params = {"duration": int(duration)} if duration else None
+                    min_temp = params.get("min_temp")
+                    cmd_params = None
+                    if duration or min_temp:
+                        cmd_params = {}
+                        if duration:
+                            cmd_params["duration"] = int(duration)
+                        if min_temp:
+                            cmd_params["min_temp"] = float(min_temp)
                     enabled = None
                     if "enabled" in params:
                         enabled = params["enabled"] == "1"

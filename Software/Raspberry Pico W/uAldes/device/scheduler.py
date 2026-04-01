@@ -378,8 +378,41 @@ class Scheduler:
                             print(f"Scheduler: Status recorded")
                         else:
                             self._record_execution(i, schedule, False, None, "No status callback")
+                    elif cmd_type == "boost":
+                        # Boost with optional min_temp condition
+                        cmd_params = command.get("params", {})
+                        min_temp = cmd_params.get("min_temp")
+
+                        # Check temperature condition if min_temp is specified
+                        if min_temp is not None and self.status_callback:
+                            try:
+                                status = self.status_callback()
+                                t_haut = status.get("T_haut")
+                                if t_haut is not None and float(t_haut) >= float(min_temp):
+                                    output = {
+                                        "skipped": True,
+                                        "reason": f"T_haut ({t_haut}C) >= min_temp ({min_temp}C)",
+                                        "T_haut": float(t_haut),
+                                        "min_temp": float(min_temp)
+                                    }
+                                    self._record_execution(i, schedule, True, output)
+                                    print(f"Scheduler: Boost skipped - T_haut ({t_haut}C) >= {min_temp}C")
+                                    continue
+                            except (ValueError, TypeError):
+                                pass
+
+                        # Execute boost
+                        cmd_json = json.dumps({"type": "boost"})
+                        frame = ualdes.frame_encode(cmd_json)
+                        if frame:
+                            self.uart.write(bytearray(frame))
+                            output = self.status_callback() if self.status_callback else None
+                            self._record_execution(i, schedule, True, output)
+                            print(f"Scheduler: Executed boost")
+                        else:
+                            self._record_execution(i, schedule, False, None, "Failed to encode")
                     else:
-                        # Write command
+                        # Other write commands
                         cmd_json = json.dumps(command)
                         frame = ualdes.frame_encode(cmd_json)
                         if frame:

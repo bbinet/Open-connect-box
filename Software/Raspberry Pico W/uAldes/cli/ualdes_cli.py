@@ -484,6 +484,12 @@ def format_response(data):
         else:
             return "OK"
 
+    # Handle skipped commands (e.g., boost with min_temp condition not met)
+    if "status" in data and data["status"] == "skipped":
+        cmd = data.get("command", "")
+        reason = data.get("reason", "condition not met")
+        return f"SKIPPED: {cmd} - {reason}"
+
     return json.dumps(data, indent=2)
 
 
@@ -502,7 +508,8 @@ DEFAULT_API = {
         },
         "/boost": {
             "description": "Set boost mode",
-            "example": "curl http://{ip}/boost"
+            "params": {"min_temp": "only run if T_haut < value (optional)"},
+            "example": "curl 'http://{ip}/boost?min_temp=22'"
         },
         "/confort": {
             "description": "Set comfort mode for N days",
@@ -522,6 +529,11 @@ DEFAULT_API = {
         "/info": {
             "description": "Get device info (version, uptime, IP)",
             "example": "curl http://{ip}/info"
+        },
+        "/schedules": {
+            "description": "Manage scheduled commands",
+            "params": {"action": "list|add|edit|remove", "hour": "0-23", "minute": "0-59", "type": "command type", "min_temp": "boost condition"},
+            "example": "curl 'http://{ip}/schedules?action=add&hour=5&minute=0&type=boost&min_temp=42'"
         }
     },
     "test_mode": "Add --test to any command to get fake data without sending commands"

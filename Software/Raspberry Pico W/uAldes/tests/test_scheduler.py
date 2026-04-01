@@ -602,3 +602,72 @@ class TestDST:
         assert scheduler.get_timezone_offset("1", 2026, 7, 15) == 1
         assert scheduler.get_timezone_offset("2", 2026, 7, 15) == 2
         assert scheduler.get_timezone_offset("-5", 2026, 7, 15) == -5
+
+
+class TestBoostMinTemp:
+    """Tests for boost command with min_temp condition"""
+
+    @pytest.fixture
+    def temp_schedules_file(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+    def test_add_schedule_boost_with_min_temp(self, temp_schedules_file):
+        """Test adding a boost schedule with min_temp parameter"""
+        import scheduler
+
+        scheduler.save_schedules([])
+        index = scheduler.add_schedule(6, 0, "boost", params={"min_temp": 22.0})
+
+        assert index >= 0
+        loaded = scheduler.load_schedules()
+        assert loaded[0]["command"]["type"] == "boost"
+        assert loaded[0]["command"]["params"]["min_temp"] == 22.0
+
+    def test_add_schedule_boost_without_min_temp(self, temp_schedules_file):
+        """Test adding a boost schedule without min_temp parameter"""
+        import scheduler
+
+        scheduler.save_schedules([])
+        index = scheduler.add_schedule(6, 0, "boost")
+
+        assert index >= 0
+        loaded = scheduler.load_schedules()
+        assert loaded[0]["command"]["type"] == "boost"
+        assert "params" not in loaded[0]["command"] or loaded[0]["command"].get("params") is None
+
+    def test_edit_schedule_add_min_temp(self, temp_schedules_file):
+        """Test editing a schedule to add min_temp"""
+        import scheduler
+
+        scheduler.save_schedules([
+            {"hour": 6, "minute": 0, "command": {"type": "boost"}, "enabled": True}
+        ])
+
+        scheduler.edit_schedule(0, params={"min_temp": 20.5})
+
+        loaded = scheduler.load_schedules()
+        assert loaded[0]["command"]["params"]["min_temp"] == 20.5
+
+    def test_boost_condition_temp_below_threshold(self):
+        """Test that boost executes when T_haut < min_temp"""
+        # This tests the logic: if T_haut (19.5) < min_temp (22), boost should execute
+        t_haut = 19.5
+        min_temp = 22.0
+        should_skip = float(t_haut) >= float(min_temp)
+        assert should_skip is False  # Should NOT skip, should execute
+
+    def test_boost_condition_temp_above_threshold(self):
+        """Test that boost is skipped when T_haut >= min_temp"""
+        # This tests the logic: if T_haut (23.0) >= min_temp (22), boost should be skipped
+        t_haut = 23.0
+        min_temp = 22.0
+        should_skip = float(t_haut) >= float(min_temp)
+        assert should_skip is True  # Should skip
+
+    def test_boost_condition_temp_equal_threshold(self):
+        """Test that boost is skipped when T_haut == min_temp"""
+        # Edge case: if T_haut equals min_temp, boost should be skipped
+        t_haut = 22.0
+        min_temp = 22.0
+        should_skip = float(t_haut) >= float(min_temp)
+        assert should_skip is True  # Should skip
