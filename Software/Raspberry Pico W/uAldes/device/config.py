@@ -58,6 +58,7 @@ SCHEDULER_CONFIG = {
 ITEMS_MAPPING = {
     "Soft": {"Index": 4, "Type": 5, "Publish": True},
     "Etat": {"Index": 6, "Type": 0, "Publish": True},
+    "Entree_HC": {"Index": 9, "Type": 0, "Publish": True},  # Heures creuses input
     "Comp_C": {"Index": 28, "Type": 1, "Publish": True},
     "Comp_R": {"Index": 29, "Type": 1, "Publish": True},
     "T_hp": {"Index": 32, "Type": 2, "Publish": True},
@@ -68,6 +69,10 @@ ITEMS_MAPPING = {
     "DP": {"Index": 38, "Type": 0, "Publish": True},
     "Ventil_flow": {"Index": 39, "Type": 4, "Publish": True},
     "Ventil_rpm": {"Index": 40, "Type": 3, "Publish": True},
+    # Energy counters (32-bit LE, W·min -> kWh)
+    "Conso_vmc": {"Index": 41, "Type": 110, "Publish": True},
+    "Conso_pac": {"Index": 49, "Type": 111, "Publish": True},
+    "Conso_resistance": {"Index": 57, "Type": 112, "Publish": True},
 }
 
 # Hardware Configuration for RP2040 + ESP8285 clone

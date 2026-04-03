@@ -270,6 +270,7 @@ def discover_devices():
 FIELD_LABELS = {
     "Etat": "State",
     "Soft": "Firmware version",
+    "Entree_HC": "Off-peak input",
     "T_vmc": "VMC temperature",
     "T_hp": "HP temperature",
     "T_evap": "Evaporator temp",
@@ -280,6 +281,9 @@ FIELD_LABELS = {
     "DP": "Delta pressure",
     "Ventil_flow": "Ventilation flow",
     "Ventil_rpm": "Fan speed",
+    "Conso_vmc": "Energy VMC",
+    "Conso_pac": "Energy heat pump",
+    "Conso_resistance": "Energy resistance",
 }
 
 FIELD_UNITS = {
@@ -289,6 +293,9 @@ FIELD_UNITS = {
     "T_haut": "C",
     "T_bas": "C",
     "Ventil_rpm": "RPM",
+    "Conso_vmc": "kWh",
+    "Conso_pac": "kWh",
+    "Conso_resistance": "kWh",
 }
 
 

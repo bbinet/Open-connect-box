@@ -266,7 +266,17 @@ def decode_temperature_bcd(value):
     
     return temperature
 
-def decode_value(value,type):
+def _u32_le(data, index):
+    """Decode 32-bit little-endian unsigned int from data[index:index+4]."""
+    return data[index] + (data[index + 1] << 8) + (data[index + 2] << 16) + (data[index + 3] << 24)
+
+
+def _wmin_to_kwh(wmin):
+    """Convert Watt-minutes (W·min) to kWh."""
+    return round(wmin / 60000.0, 3)
+
+
+def decode_value(value, type, data=None, index=None):
     """
     Decodes a numeric value based on the specified type and returns it as a string.
 
@@ -279,8 +289,11 @@ def decode_value(value,type):
             3: Multiply by 10
             4: Multiply by 2 and subtract 1
             5: Convert to hexadecimal and return last 2 characters
-            other: Return as is
             6: Decode as BCD temperature with 0.25°C precision
+            110-112: 32-bit LE energy counter (W·min -> kWh)
+            other: Return as is
+        data: Full frame data (required for 32-bit counters)
+        index: Index in frame (required for 32-bit counters)
 
     Returns:
         str: The decoded value as a string.
@@ -292,7 +305,7 @@ def decode_value(value,type):
         return str(value / 2)
     elif type == 2:
         return str(value * 0.5 - 20)
-    elif type == 3: 
+    elif type == 3:
         return str(value * 10)
     elif type == 4:
         return str(value * 2-1)
@@ -300,6 +313,13 @@ def decode_value(value,type):
         return str(hex(value)[-2:])
     elif type == 6:
         return str(decode_temperature_bcd(value))
+    elif type in (110, 111, 112) and data is not None and index is not None:
+        # 32-bit LE energy counter (W·min -> kWh)
+        try:
+            raw_wmin = _u32_le(data, index)
+            return str(_wmin_to_kwh(raw_wmin))
+        except (IndexError, TypeError):
+            return "0"
     else:
         return str(value)
 
@@ -331,8 +351,10 @@ def frame_decode(data):
         for item, properties in ITEMS_MAPPING.items():
             # Decode the value based on its type
             if properties["Publish"]:
+                idx = properties["Index"]
+                typ = properties["Type"]
                 # Decode the value using the decode_value function
-                decoded_value = decode_value(data[properties["Index"]], properties["Type"])
+                decoded_value = decode_value(data[idx], typ, data, idx)
                 # Store the decoded value in the dictionary
                 decoded_frame[item] = decoded_value
 
