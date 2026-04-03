@@ -15,6 +15,71 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
+class Table:
+    """Helper class for building ASCII tables with automatic width calculation."""
+
+    def __init__(self, min_width=30):
+        self.min_width = min_width
+        self.rows = []
+
+    def title(self, text):
+        """Add a centered title row."""
+        self.rows.append(('title', text))
+        return self
+
+    def subtitle(self, text):
+        """Add a centered subtitle row."""
+        self.rows.append(('subtitle', text))
+        return self
+
+    def separator(self):
+        """Add a separator line."""
+        self.rows.append(('sep', None))
+        return self
+
+    def row(self, left, right=""):
+        """Add a row with left and optional right-aligned content."""
+        self.rows.append(('row', (left, right)))
+        return self
+
+    def text(self, text):
+        """Add a left-aligned text row."""
+        self.rows.append(('text', text))
+        return self
+
+    def render(self):
+        """Render the table to a string."""
+        # Calculate width based on content
+        width = self.min_width
+        for rtype, content in self.rows:
+            if rtype == 'title' or rtype == 'subtitle':
+                width = max(width, len(content) + 4)
+            elif rtype == 'row':
+                left, right = content
+                width = max(width, len(left) + len(str(right)) + 3)
+            elif rtype == 'text':
+                width = max(width, len(content) + 2)
+
+        # Build output
+        border = '+' + '-' * width + '+'
+        lines = []
+
+        for rtype, content in self.rows:
+            if rtype == 'sep':
+                lines.append(border)
+            elif rtype == 'title' or rtype == 'subtitle':
+                lines.append(f'|{content:^{width}}|')
+            elif rtype == 'row':
+                left, right = content
+                right_str = str(right)
+                padding = width - len(left) - len(right_str) - 2
+                lines.append(f'| {left}{" " * padding}{right_str} |')
+            elif rtype == 'text':
+                lines.append(f'| {content:<{width-1}}|')
+
+        return '\n'.join(lines)
+
+
 def http_get(url, timeout=5):
     """Make HTTP/1.0 GET request (ESP8285 doesn't handle HTTP/1.1 well)"""
     # Parse URL
@@ -233,59 +298,6 @@ def visual_len(s):
     return len(s)
 
 
-def pad_right(s, width):
-    """Pad string to width, accounting for accented characters"""
-    visual = len(s)
-    return s + " " * (width - visual)
-
-
-def pad_left(s, width):
-    """Pad string to width on the left"""
-    visual = len(s)
-    return " " * (width - visual) + s
-
-
-def format_status(data):
-    """Format status data for human-readable output"""
-    if not data:
-        return "No data available"
-
-    lines = []
-    lines.append("+-------------------------------------+")
-    lines.append("|           ALDES STATUS              |")
-    lines.append("+-------------------------------------+")
-
-    # Check for staleness warning
-    warning = data.get("_warning")
-    updated_ago = data.get("_updated_ago")
-
-    if warning:
-        lines.append(f"| ⚠️  {warning:<32} |")
-        lines.append("+-------------------------------------+")
-    elif updated_ago is not None and updated_ago >= 0:
-        age_str = f"Updated {updated_ago}s ago"
-        lines.append(f"| {age_str:^35} |")
-        lines.append("+-------------------------------------+")
-
-    for key in sorted(data.keys()):
-        # Skip metadata fields
-        if key.startswith("_"):
-            continue
-        value = data[key]
-        label = FIELD_LABELS.get(key, key)
-        unit = FIELD_UNITS.get(key, "")
-        if unit:
-            value_str = f"{value} {unit}"
-        else:
-            value_str = str(value)
-        # Fixed width: 37 chars inside, label 20, value 15
-        line = f"| {label:<20} {value_str:>14} |"
-        lines.append(line)
-
-    lines.append("+-------------------------------------+")
-    return "\n".join(lines)
-
-
 INFO_LABELS = {
     "version": "Version",
     "ip": "IP Address",
@@ -299,68 +311,86 @@ INFO_LABELS = {
 }
 
 
+def format_status(data):
+    """Format status data for human-readable output"""
+    if not data:
+        return "No data available"
+
+    t = Table()
+    t.separator().title("ALDES STATUS").separator()
+
+    updated_ago = data.get("_updated_ago")
+    if updated_ago is not None and updated_ago >= 0:
+        t.title(f"Updated {updated_ago}s ago").separator()
+
+    for key in sorted(data.keys()):
+        if key.startswith("_"):
+            continue
+        value = data[key]
+        label = FIELD_LABELS.get(key, key)
+        unit = FIELD_UNITS.get(key, "")
+        value_str = f"{value} {unit}" if unit else str(value)
+        t.row(label, value_str)
+
+    t.separator()
+    return t.render()
+
+
 def format_info(data):
     """Format device info for human-readable output"""
     if not data:
         return "No data available"
 
-    lines = []
-    lines.append("+-------------------------------------+")
-    lines.append("|           DEVICE INFO               |")
-    lines.append("+-------------------------------------+")
+    t = Table()
+    t.separator().title("DEVICE INFO").separator()
 
     for key in sorted(data.keys()):
-        value = data[key]
         label = INFO_LABELS.get(key, key)
-        line = f"| {label:<18} {str(value):>16} |"
-        lines.append(line)
+        t.row(label, data[key])
 
-    lines.append("+-------------------------------------+")
-    return "\n".join(lines)
+    t.separator()
+    return t.render()
 
 
 def format_time(data):
     """Format time data"""
-    W = 37  # Same width as status/info
-    lines = []
-    lines.append("+" + "-" * W + "+")
-    lines.append(f"| {'DEVICE TIME':^{W-2}} |")
-    lines.append("+" + "-" * W + "+")
-    lines.append(f"| {data.get('formatted', 'unknown'):^{W-2}} |")
-    lines.append("+" + "-" * W + "+")
-    return "\n".join(lines)
+    return (Table()
+        .separator()
+        .title("DEVICE TIME")
+        .separator()
+        .title(data.get('formatted', 'unknown'))
+        .separator()
+        .render())
 
 
 def format_log(data):
     """Format log data"""
-    W = 60
     logs = data.get("log", [])
     total = data.get("total_lines", len(logs))
-    lines = []
-    lines.append("+" + "-" * W + "+")
-    lines.append(f"| {'DEBUG LOG':^{W-2}} |")
-    lines.append(f"| {f'Showing {len(logs)}/{total} lines':^{W-2}} |")
-    lines.append("+" + "-" * W + "+")
+
+    t = Table()
+    t.separator().title("DEBUG LOG")
+    t.title(f"Showing {len(logs)}/{total} lines").separator()
+
     for log in logs:
         if log.strip():
-            text = log[:W-2]  # Truncate if too long
-            lines.append(f"| {text:<{W-2}} |")
-    lines.append("+" + "-" * W + "+")
-    return "\n".join(lines)
+            t.text(log)
+
+    t.separator()
+    return t.render()
 
 
 def format_schedules(data):
     """Format schedules data"""
-    W = 60
     schedules = data.get("schedules", [])
     date = data.get("date", "unknown")
-    lines = []
-    lines.append("+" + "-" * W + "+")
-    lines.append(f"| {'SCHEDULES':^{W-2}} |")
-    lines.append(f"| {'Date: ' + str(date):^{W-2}} |")
-    lines.append("+" + "-" * W + "+")
+
+    t = Table()
+    t.separator().title("SCHEDULES")
+    t.title(f"Date: {date}").separator()
+
     if not schedules:
-        lines.append(f"| {'No schedules configured':^{W-2}} |")
+        t.title("No schedules configured")
     for sched in schedules:
         idx = sched.get("index", "?")
         hour = sched.get("hour", 0)
@@ -370,9 +400,8 @@ def format_schedules(data):
         params = cmd.get("params", {})
         enabled = "+" if sched.get("enabled", True) else "-"
         executed = sched.get("executed")
-        param_str = ""
-        if params:
-            param_str = " " + " ".join(f"{k}={v}" for k, v in params.items())
+
+        param_str = " " + " ".join(f"{k}={v}" for k, v in params.items()) if params else ""
         exec_str = ""
         if executed:
             exec_time = executed.get("time", "?")
@@ -380,73 +409,58 @@ def format_schedules(data):
             if executed.get("reboot"):
                 exec_status += " (reboot)"
             exec_str = f" [{exec_time}: {exec_status}]"
-        text = f"{idx}: [{enabled}] {hour:02d}:{minute:02d} -> {cmd_type}{param_str}{exec_str}"
-        lines.append(f"| {text:<{W-2}} |")
-        # Show output if present
-        if executed:
-            exec_output = executed.get("output")
-            if exec_output and isinstance(exec_output, dict):
-                for k, v in exec_output.items():
-                    out_text = f"    {k}: {v}"[:W-2]
-                    lines.append(f"| {out_text:<{W-2}} |")
-    lines.append("+" + "-" * W + "+")
-    return "\n".join(lines)
+
+        t.text(f"{idx}: [{enabled}] {hour:02d}:{minute:02d} -> {cmd_type}{param_str}{exec_str}")
+
+        if executed and executed.get("output"):
+            for k, v in executed["output"].items():
+                t.text(f"    {k}: {v}")
+
+    t.separator()
+    return t.render()
 
 
 def format_files(data):
     """Format file list"""
-    files = data.get("files", [])
-    lines = []
-    lines.append("+-------------------------------------+")
-    lines.append("|          FILES ON DEVICE            |")
-    lines.append("+-------------------------------------+")
-    for f in files:
-        name = f.get("name", "?")
-        size = f.get("size", "?")
-        lines.append(f"| {name:<26} {size:>8} |")
-    lines.append("+-------------------------------------+")
-    return "\n".join(lines)
+    t = Table()
+    t.separator().title("FILES ON DEVICE").separator()
+
+    for f in data.get("files", []):
+        t.row(f.get("name", "?"), f.get("size", "?"))
+
+    t.separator()
+    return t.render()
 
 
 def format_help_api(data):
     """Format API help"""
-    # Border is 50 dashes = 52 total, interior is 48 chars
-    endpoints = data.get("endpoints", {})
-    lines = []
-    lines.append("+--------------------------------------------------+")
-    lines.append("|                API DOCUMENTATION                 |")
+    t = Table()
+    t.separator().title("API DOCUMENTATION")
     title = data.get('api', 'uAldes API') + ' v' + data.get('version', '?')
-    lines.append(f"| {title:^48} |")
-    lines.append("+--------------------------------------------------+")
-    for ep, info in sorted(endpoints.items()):
-        desc = info.get("description", "")[:33]
-        lines.append(f"| {ep:<14}{desc:<34} |")
-        params = info.get("params", {})
-        if params:
-            for k, v in params.items():
-                pstr = f"{k}={v}"[:46]
-                lines.append(f"|   {pstr:<46} |")
-    lines.append("+--------------------------------------------------+")
-    return "\n".join(lines)
+    t.title(title).separator()
+
+    for ep, info in sorted(data.get("endpoints", {}).items()):
+        desc = info.get("description", "")
+        t.row(ep, desc)
+        for k, v in info.get("params", {}).items():
+            t.text(f"  {k}={v}")
+
+    t.separator()
+    return t.render()
 
 
 def format_mode(data):
     """Format mode data"""
-    W = 37
-    lines = []
-    lines.append("+" + "-" * W + "+")
-    lines.append(f"| {'CURRENT MODE':^{W-2}} |")
-    lines.append("+" + "-" * W + "+")
-    mode = data.get("mode", "unknown").upper()
-    lines.append(f"| Mode: {mode:<{W-9}} |")
+    t = Table()
+    t.separator().title("CURRENT MODE").separator()
+    t.row("Mode:", data.get("mode", "unknown").upper())
     if data.get("remaining_days"):
         remaining = round(data["remaining_days"], 1)
-        remaining_str = f"{remaining} day{'s' if remaining != 1 else ''}"
-        lines.append(f"| Remaining: {remaining_str:<{W-14}} |")
+        t.row("Remaining:", f"{remaining} day{'s' if remaining != 1 else ''}")
     if data.get("expired"):
-        lines.append(f"| {'(mode expired)':^{W-2}} |")
-    lines.append("+" + "-" * W + "+")
-    return "\n".join(lines)
+        t.title("(mode expired)")
+    t.separator()
+    return t.render()
 
 
 def format_response(data):
