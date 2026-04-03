@@ -294,8 +294,10 @@ def cmd_cp(repl, args):
             # Upload each chunk to a separate file
             for i, chunk in enumerate(chunks):
                 chunk_file = f"{chunk_prefix}.{i}"
-                expected_size = len(chunk)
-                code = f"f=open('{chunk_file}','w');f.write({repr(chunk)});f.close()"
+                # Use byte length for verification (UTF-8 chars can be multi-byte)
+                expected_size = len(chunk.encode('utf-8'))
+                # Use ascii() to escape non-ASCII chars, avoiding double-encoding over the wire
+                code = f"f=open('{chunk_file}','w');f.write({ascii(chunk)});f.close()"
 
                 # Write chunk with retry
                 for attempt in range(3):
@@ -312,11 +314,12 @@ def cmd_cp(repl, args):
 
                     # Verify chunk size
                     time.sleep(0.05)
-                    out, _ = repl.exec_raw(f"__import__('os').stat('{chunk_file}')[6]")
-                    if out and out.strip() and int(out.strip()) == expected_size:
+                    out, err = repl.exec_raw(f"__import__('os').stat('{chunk_file}')[6]")
+                    actual_size = int(out.strip()) if out and out.strip() else -1
+                    if actual_size == expected_size:
                         break
                     if attempt < 2:
-                        print(f"\nRetrying chunk {i} (verify)...", file=sys.stderr)
+                        print(f"\nRetrying chunk {i} (verify: expected={expected_size}, got={actual_size}, err={err})...", file=sys.stderr)
                         time.sleep(0.5)
                         repl.close()
                         repl.connect()
@@ -368,12 +371,13 @@ os.rename('{path}.tmp', '{path}')
                 print("FAILED (cannot verify)")
                 return False
             remote_size = int(out.strip())
-            if remote_size != len(content):
-                print(f"FAILED (size {remote_size} != {len(content)})")
+            expected_total = len(content.encode('utf-8'))
+            if remote_size != expected_total:
+                print(f"FAILED (size {remote_size} != {expected_total})")
                 return False
             print("OK")
 
-        print(f"Copied {src} -> {path} ({len(content)} bytes)")
+        print(f"Copied {src} -> {path} ({len(content.encode('utf-8'))} bytes)")
         return True
     else:
         print("Error: one of src or dst must start with ':'", file=sys.stderr)
