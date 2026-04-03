@@ -440,8 +440,9 @@ def format_mode(data):
     mode = data.get("mode", "unknown").upper()
     lines.append(f"| Mode: {mode:<{W-9}} |")
     if data.get("remaining_days"):
-        remaining = data["remaining_days"]
-        lines.append(f"| Remaining: {remaining} days{' '*(W-17-len(str(remaining)))} |")
+        remaining = round(data["remaining_days"], 1)
+        remaining_str = f"{remaining} day{'s' if remaining != 1 else ''}"
+        lines.append(f"| Remaining: {remaining_str:<{W-14}} |")
     if data.get("expired"):
         lines.append(f"| {'(mode expired)':^{W-2}} |")
     lines.append("+" + "-" * W + "+")
@@ -457,7 +458,7 @@ def format_response(data):
         return f"Error: {data['error']}"
 
     # Mode endpoint
-    if "mode" in data and len(data) <= 5 and "mode" in data:
+    if "mode" in data and "set_ago" in data:
         return format_mode(data)
 
     # Special formatting for info endpoint
