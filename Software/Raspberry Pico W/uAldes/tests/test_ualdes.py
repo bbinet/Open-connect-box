@@ -348,3 +348,93 @@ class TestRoundTrip:
         frame2 = ualdes.frame_encode(cmd)
 
         assert frame1 == frame2
+
+
+class TestModeTracking:
+    """Tests for mode tracking in frame_encode"""
+
+    def test_auto_mode_tracked(self, reset_time):
+        """Test that auto mode is tracked"""
+        import ualdes
+
+        ualdes.frame_encode('{"type": "auto"}')
+        info = ualdes.get_mode_info()
+
+        assert info["mode"] == "auto"
+        assert "set_ago" in info
+
+    def test_boost_mode_tracked(self, reset_time):
+        """Test that boost mode is tracked"""
+        import ualdes
+
+        ualdes.frame_encode('{"type": "boost"}')
+        info = ualdes.get_mode_info()
+
+        assert info["mode"] == "boost"
+
+    def test_confort_mode_tracked_with_duration(self, reset_time):
+        """Test that confort mode is tracked with duration"""
+        import ualdes
+
+        ualdes.frame_encode('{"type": "confort", "params": {"duration": 3}}')
+        info = ualdes.get_mode_info()
+
+        assert info["mode"] == "confort"
+        assert info["duration"] == 3
+        assert "remaining_seconds" in info
+        assert "remaining_days" in info
+
+    def test_vacances_mode_tracked_with_duration(self, reset_time):
+        """Test that vacances mode is tracked with duration"""
+        import ualdes
+
+        ualdes.frame_encode('{"type": "vacances", "params": {"duration": 7}}')
+        info = ualdes.get_mode_info()
+
+        assert info["mode"] == "vacances"
+        assert info["duration"] == 7
+
+    def test_temp_command_does_not_change_mode(self, reset_time):
+        """Test that temp command doesn't change mode tracking"""
+        import ualdes
+
+        # Set initial mode
+        ualdes.frame_encode('{"type": "confort", "params": {"duration": 2}}')
+        # Send temp command
+        ualdes.frame_encode('{"type": "temp", "params": {"temperature": 22}}')
+
+        info = ualdes.get_mode_info()
+        assert info["mode"] == "confort"
+
+    def test_remaining_time_decreases(self, reset_time):
+        """Test that remaining time decreases over time"""
+        import ualdes
+
+        reset_time._reset()
+        ualdes.frame_encode('{"type": "confort", "params": {"duration": 1}}')
+
+        info1 = ualdes.get_mode_info()
+        remaining1 = info1["remaining_seconds"]
+
+        # Advance time by 1 hour
+        reset_time._advance(3600 * 1000)
+
+        info2 = ualdes.get_mode_info()
+        remaining2 = info2["remaining_seconds"]
+
+        assert remaining2 < remaining1
+        assert remaining1 - remaining2 == 3600
+
+    def test_mode_expired_flag(self, reset_time):
+        """Test that expired flag is set when duration passes"""
+        import ualdes
+
+        reset_time._reset()
+        ualdes.frame_encode('{"type": "confort", "params": {"duration": 1}}')
+
+        # Advance time past 1 day
+        reset_time._advance(25 * 3600 * 1000)
+
+        info = ualdes.get_mode_info()
+        assert info.get("expired") is True
+        assert info["remaining_seconds"] == 0

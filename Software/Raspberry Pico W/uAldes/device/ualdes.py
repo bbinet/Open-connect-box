@@ -23,6 +23,7 @@ SOFTWARE.
 """
 
 import json
+import utime
 from config import ITEMS_MAPPING
 """
 UAldes - Python library for Aldes UART Protocol
@@ -57,6 +58,36 @@ except (ImportError, AttributeError):
         "Ventil_flow": {"Index": 39, "Type": 4, "Publish": True},
         "Ventil_rpm": {"Index": 40, "Type": 3, "Publish": True},
     }
+
+# Mode tracking (updated in frame_encode)
+_current_mode = "auto"
+_mode_duration = None
+_mode_set_time = None
+
+
+def get_mode_info():
+    """Get current mode with remaining duration info."""
+    global _current_mode, _mode_duration, _mode_set_time
+
+    result = {"mode": _current_mode}
+
+    if _mode_set_time is None:
+        return result
+
+    now = utime.time()
+    set_ago = now - _mode_set_time
+    result["set_ago"] = set_ago
+
+    if _mode_duration and _current_mode in ("confort", "vacances"):
+        result["duration"] = _mode_duration
+        duration_seconds = _mode_duration * 24 * 3600
+        remaining = duration_seconds - set_ago
+        result["remaining_seconds"] = max(0, remaining)
+        result["remaining_days"] = max(0, remaining / 86400)
+        result["expired"] = remaining <= 0
+
+    return result
+
 
 def aldes_checksum(data):
     """
@@ -179,6 +210,14 @@ def frame_encode(command):
         # Calculate the checksum
         checksum = -sum(base_frame) & 0xFF
         base_frame.append(checksum)
+
+        # Track mode change
+        global _current_mode, _mode_duration, _mode_set_time
+        if frame_type in ("auto", "boost", "confort", "vacances"):
+            _current_mode = frame_type
+            _mode_duration = params.get("duration") if frame_type in ("confort", "vacances") else None
+            _mode_set_time = utime.time()
+
         return base_frame
 
     except :
