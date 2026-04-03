@@ -660,6 +660,12 @@ class UAldesCLI(cmd.Cmd):
                                 first_param = list(param_info.keys())[0]
                                 if first_param not in params:
                                     params[first_param] = a
+                    # Handle index=all for schedules endpoint
+                    if ep == "/schedules" and params.get("index") == "all":
+                        action = params.get("action", "")
+                        if action in ("disable", "enable", "remove"):
+                            self._schedules_all(action)
+                            return
                     self._request(ep, params if params else None, is_status=is_status_endpoint)
                 do_method.__doc__ = doc
                 return do_method
@@ -716,6 +722,31 @@ class UAldesCLI(cmd.Cmd):
                     print("Error: Invalid JSON response")
                 return None
         return None
+
+    def _schedules_all(self, action):
+        """Apply action to all schedules"""
+        # First get all schedules
+        data = self._request("/schedules", silent=True)
+        if not data:
+            print("Error: Could not fetch schedules")
+            return
+
+        schedules = data.get("schedules", [])
+        if not schedules:
+            print("No schedules to modify")
+            return
+
+        count = len(schedules)
+        # For remove, go in reverse order to avoid index shifting
+        indices = range(count - 1, -1, -1) if action == "remove" else range(count)
+
+        success = 0
+        for i in indices:
+            result = self._request("/schedules", {"action": action, "index": str(i)}, silent=True)
+            if result and result.get("status") == "ok":
+                success += 1
+
+        print(f"{action.capitalize()}d {success}/{count} schedules")
 
     def do_help_api(self, arg):
         """Show full API documentation from device"""
